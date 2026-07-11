@@ -1431,7 +1431,14 @@ function SignIn() {
     setLoading(false);
     if (error) setErr(error.message); else setSent(true);
   };
-  const kakao = () => setErr("카카오 로그인은 다음 단계에서 연결돼요. 지금은 이메일로 시작해 주세요.");
+  const kakao = async () => {
+    setErr("");
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "kakao",
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) setErr(error.message);
+  };
 
   return (
     <div>
@@ -1496,7 +1503,7 @@ function ProfileSetup({ user }) {
       <div style={{ padding: "0 16px" }}>
         <div style={{ background: T.sageSoft, borderRadius: 11, padding: "11px 13px", marginBottom: 16, display: "flex", gap: 8, alignItems: "center" }}>
           <ShieldCheck size={16} color={T.sage} />
-          <span style={{ fontSize: 13.5, color: "#3E5A44", fontWeight: 500 }}>{user.email} 로그인됨</span>
+          <span style={{ fontSize: 13.5, color: "#3E5A44", fontWeight: 500 }}>{user.email ? `${user.email} 로그인됨` : "카카오 계정으로 로그인됨"}</span>
         </div>
         <Field icon={User} label="닉네임" placeholder="공동체에서 불릴 이름" value={nick} onChange={setNick} />
         <Field icon={Church} label="소속 교회 (선택)" placeholder="예 · 은혜교회 중고등부" value={church} onChange={setChurch} />
