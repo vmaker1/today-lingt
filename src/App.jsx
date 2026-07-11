@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { supabase } from "./supabase.js";
 import {
   Sunrise, BookOpen, Feather, HeartHandshake, Music, Church, Footprints,
   Sprout, Star, NotebookPen, MessageCircle, Award, User, Play, Check, Heart,
@@ -213,8 +214,25 @@ export default function App() {
   const [points, setPoints] = useState(0);
   const [log, setLog] = useState([]);
   const [posts, setPosts] = useState(SEED_POSTS);
-  const [user, setUser] = useState(null);
   const [toast, setToast] = useState(null);
+
+  // Supabase 로그인 세션
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  const user = session ? {
+    id: session.user.id,
+    email: session.user.email,
+    name: session.user.user_metadata?.nickname || "",
+    church: session.user.user_metadata?.church || "미입력",
+    method: session.user.app_metadata?.provider === "kakao" ? "kakao" : "email",
+  } : null;
+  const profileComplete = !!(user && user.name);
+  const signOut = () => supabase.auth.signOut();
 
   const [done7, setDone7] = useState(Object.fromEntries(DIMS.map((d) => [d.key, false])));
   const [journal, setJournal] = useState(SEED_JOURNAL);
@@ -261,7 +279,7 @@ export default function App() {
   };
 
   const doneCount = DIMS.filter((d) => done7[d.key]).length;
-  const ctx = { tab, setTab, points, log, posts, setPosts, user, setUser, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, rooms, setRooms, threads, setThreads, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit };
+  const ctx = { tab, setTab, points, log, posts, setPosts, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, rooms, setRooms, threads, setThreads, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit };
 
   return (
     <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
@@ -1311,9 +1329,11 @@ function FruitChallenge({ onClose, earnedFruits, growingFruit, growStep, selectF
 /* ─────────────────────────────────────────────
    내 정보 · 회원가입
 ────────────────────────────────────────────── */
-function Me({ user, setUser, points }) {
-  if (user) return <Profile user={user} points={points} onOut={() => setUser(null)} />;
-  return <SignUp onDone={setUser} />;
+function Me({ user, profileComplete, authReady, points, signOut }) {
+  if (!authReady) return <div style={{ padding: 60, textAlign: "center", color: T.muted, fontSize: 14 }}>불러오는 중…</div>;
+  if (!user) return <SignIn />;
+  if (!profileComplete) return <ProfileSetup user={user} />;
+  return <Profile user={user} points={points} onOut={signOut} />;
 }
 
 function Profile({ user, points, onOut }) {
@@ -1395,22 +1415,23 @@ function InfoRow({ icon: Icon, label, value, last }) {
   );
 }
 
-function SignUp({ onDone }) {
-  const [step, setStep] = useState(0);        // 0 시작, 1 프로필
-  const [method, setMethod] = useState(null); // 'kakao' | 'email'
-  const [nick, setNick] = useState("");
-  const [church, setChurch] = useState("");
+function SignIn() {
   const [email, setEmail] = useState("");
-  const [agree, setAgree] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
 
-  const RULES = [
-    "서로를 존중하고 격려하는 말을 나눠요",
-    "비방·혐오·차별의 표현은 삼가요",
-    "다른 사람의 개인정보를 함부로 공유하지 않아요",
-    "부적절한 행동은 신고할 수 있고, 심하면 이용이 제한돼요",
-  ];
-  const start = (m) => { setMethod(m); setStep(1); };
-  const canJoin = nick.trim() && agree && (method !== "email" || email.trim());
+  const sendLink = async () => {
+    if (!email.trim() || loading) return;
+    setLoading(true); setErr("");
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setLoading(false);
+    if (error) setErr(error.message); else setSent(true);
+  };
+  const kakao = () => setErr("카카오 로그인은 다음 단계에서 연결돼요. 지금은 이메일로 시작해 주세요.");
 
   return (
     <div>
@@ -1421,47 +1442,28 @@ function SignUp({ onDone }) {
           <p style={{ margin: "9px 0 0", fontSize: 12.5, color: T.goldDeep, fontWeight: 700 }}>마태복음 11:28 · 함께 걸어요</p>
         </div>
 
-        {step === 0 && (
+        {sent ? (
+          <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.line}`, padding: "26px 20px", textAlign: "center" }}>
+            <div style={{ width: 54, height: 54, borderRadius: 16, background: T.sageSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><Mail size={26} color={T.sage} /></div>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>메일함을 확인해 주세요</p>
+            <p style={{ margin: "8px 0 0", fontSize: 13.5, color: T.muted, lineHeight: 1.6 }}><b style={{ color: T.inkSoft }}>{email}</b> 로 로그인 링크를 보냈어요.<br />메일의 링크를 누르면 로그인돼요.</p>
+            <button onClick={() => setSent(false)} style={{ marginTop: 16, fontSize: 13.5, color: T.gold, fontWeight: 700 }}>다른 이메일로 다시 하기</button>
+          </div>
+        ) : (
           <div>
-            <button onClick={() => start("kakao")} style={{ width: "100%", padding: "15px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: "#FEE500", color: "#3A1D1D", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 10 }}>
+            <button onClick={kakao} style={{ width: "100%", padding: "15px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: "#FEE500", color: "#3A1D1D", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 16 }}>
               <MessageCircle size={18} fill="#3A1D1D" color="#3A1D1D" /> 카카오로 시작하기
             </button>
-            <button onClick={() => start("email")} style={{ width: "100%", padding: "15px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: T.card, color: T.ink, border: `1px solid ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-              <Mail size={17} color={T.ink} /> 이메일로 시작하기
-            </button>
-            <p style={{ margin: "16px 6px 0", fontSize: 12.5, color: T.muted, lineHeight: 1.6, textAlign: "center" }}>시작하면 <b style={{ color: T.inkSoft }}>이용약관</b>과 <b style={{ color: T.inkSoft }}>커뮤니티 규칙</b>에 동의하는 것으로 여겨요.</p>
-            <p style={{ margin: "6px 6px 0", fontSize: 11.5, color: T.muted, textAlign: "center" }}>* 지금은 데모라 실제 로그인 없이 다음으로 넘어가요.</p>
-          </div>
-        )}
-
-        {step === 1 && (
-          <div>
-            <div style={{ background: T.sageSoft, borderRadius: 11, padding: "11px 13px", marginBottom: 16, display: "flex", gap: 8, alignItems: "center" }}>
-              <ShieldCheck size={16} color={T.sage} />
-              <span style={{ fontSize: 13.5, color: "#3E5A44", fontWeight: 500 }}>{method === "kakao" ? "카카오 계정 연결됨" : "이메일로 가입"}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 16px" }}>
+              <div style={{ flex: 1, height: 1, background: T.line }} /><span style={{ fontSize: 12, color: T.muted }}>또는 이메일로</span><div style={{ flex: 1, height: 1, background: T.line }} />
             </div>
-            <Field icon={User} label="닉네임" placeholder="공동체에서 불릴 이름" value={nick} onChange={setNick} />
-            <Field icon={Church} label="소속 교회 (선택)" placeholder="예 · 은혜교회 중고등부" value={church} onChange={setChurch} />
-            {method === "email" && <Field icon={Mail} label="이메일" placeholder="name@example.com" value={email} onChange={setEmail} />}
-
-            <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.line}`, padding: "15px 15px 6px", marginBottom: 16 }}>
-              <p style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>함께 지킬 커뮤니티 규칙</p>
-              {RULES.map((r) => (
-                <div key={r} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 9 }}>
-                  <span style={{ width: 5, height: 5, borderRadius: 999, background: T.gold, flexShrink: 0, marginTop: 7 }} />
-                  <span style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.5 }}>{r}</span>
-                </div>
-              ))}
-              <label onClick={() => setAgree((a) => !a)} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0 6px", borderTop: `1px solid ${T.line}`, cursor: "pointer" }}>
-                <span style={{ width: 22, height: 22, borderRadius: 7, background: agree ? T.sage : "#fff", border: `1px solid ${agree ? T.sage : T.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{agree && <Check size={14} color="#fff" />}</span>
-                <span style={{ fontSize: 13.5, color: T.ink, fontWeight: 500 }}>규칙에 동의하고 건강한 공동체에 함께해요</span>
-              </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 13px", marginBottom: 10 }}>
+              <Mail size={17} color={T.gold} />
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" style={{ flex: 1, border: "none", outline: "none", padding: "13px 0", fontSize: 15.5, color: T.ink, background: "transparent" }} />
             </div>
-
-            <div style={{ display: "flex", gap: 9 }}>
-              <BackBtn onClick={() => setStep(0)} />
-              <NextBtn disabled={!canJoin} onClick={() => onDone({ name: nick.trim(), church: church.trim() || "미입력", method, email: method === "email" ? email.trim() : "카카오 계정 연결" })}>가입 완료</NextBtn>
-            </div>
+            <button onClick={sendLink} disabled={!email.trim() || loading} style={{ width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: (!email.trim() || loading) ? T.line : T.ink, color: (!email.trim() || loading) ? T.muted : "#fff" }}>{loading ? "보내는 중…" : "이메일로 로그인 링크 받기"}</button>
+            {err && <p style={{ margin: "12px 2px 0", fontSize: 12.5, color: T.rose, lineHeight: 1.5 }}>{err}</p>}
+            <p style={{ margin: "14px 6px 0", fontSize: 12, color: T.muted, lineHeight: 1.6, textAlign: "center" }}>처음이면 자동으로 가입돼요. 시작하면 <b style={{ color: T.inkSoft }}>이용약관</b>·<b style={{ color: T.inkSoft }}>커뮤니티 규칙</b>에 동의하는 것으로 여겨요.</p>
           </div>
         )}
       </div>
@@ -1469,29 +1471,52 @@ function SignUp({ onDone }) {
   );
 }
 
-function VerifyStep({ icon, label, placeholder, type, value, onChange, sent, onSend, code, onCode, ok, onVerify, onNext, onBack }) {
+function ProfileSetup({ user }) {
+  const [nick, setNick] = useState("");
+  const [church, setChurch] = useState("");
+  const [agree, setAgree] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const RULES = [
+    "서로를 존중하고 격려하는 말을 나눠요",
+    "비방·혐오·차별의 표현은 삼가요",
+    "다른 사람의 개인정보를 함부로 공유하지 않아요",
+    "부적절한 행동은 신고할 수 있고, 심하면 이용이 제한돼요",
+  ];
+  const save = async () => {
+    if (!nick.trim() || !agree || saving) return;
+    setSaving(true);
+    await supabase.auth.updateUser({ data: { nickname: nick.trim(), church: church.trim() || "미입력" } });
+    setSaving(false);
+  };
+  const canSave = nick.trim() && agree && !saving;
+
   return (
     <div>
-      <div style={{ marginBottom: 13 }}>
-        <p style={{ margin: "0 0 7px", fontSize: 14, fontWeight: 700, color: T.ink }}>{label}</p>
-        <div style={{ display: "flex", gap: 8 }}>
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 9, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 13px" }}>
-            {React.createElement(icon, { size: 17, color: T.gold })}
-            <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={{ flex: 1, border: "none", outline: "none", padding: "12px 0", fontSize: 15.5, color: T.ink, background: "transparent" }} />
-          </div>
-          <button onClick={onSend} disabled={!value} style={{ padding: "0 15px", borderRadius: 11, background: value ? T.ink : T.line, color: value ? "#fff" : T.muted, fontSize: 14, fontWeight: 700, whiteSpace: "nowrap" }}>{sent ? "재발송" : "인증요청"}</button>
+      <Header title="프로필 설정" subtitle="공동체에서 함께 쓸 정보를 정해요" />
+      <div style={{ padding: "0 16px" }}>
+        <div style={{ background: T.sageSoft, borderRadius: 11, padding: "11px 13px", marginBottom: 16, display: "flex", gap: 8, alignItems: "center" }}>
+          <ShieldCheck size={16} color={T.sage} />
+          <span style={{ fontSize: 13.5, color: "#3E5A44", fontWeight: 500 }}>{user.email} 로그인됨</span>
         </div>
+        <Field icon={User} label="닉네임" placeholder="공동체에서 불릴 이름" value={nick} onChange={setNick} />
+        <Field icon={Church} label="소속 교회 (선택)" placeholder="예 · 은혜교회 중고등부" value={church} onChange={setChurch} />
+
+        <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.line}`, padding: "15px 15px 6px", margin: "4px 0 16px" }}>
+          <p style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>함께 지킬 커뮤니티 규칙</p>
+          {RULES.map((r) => (
+            <div key={r} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 9 }}>
+              <span style={{ width: 5, height: 5, borderRadius: 999, background: T.gold, flexShrink: 0, marginTop: 7 }} />
+              <span style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.5 }}>{r}</span>
+            </div>
+          ))}
+          <label onClick={() => setAgree((a) => !a)} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0 6px", borderTop: `1px solid ${T.line}`, cursor: "pointer" }}>
+            <span style={{ width: 22, height: 22, borderRadius: 7, background: agree ? T.sage : "#fff", border: `1px solid ${agree ? T.sage : T.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{agree && <Check size={14} color="#fff" />}</span>
+            <span style={{ fontSize: 13.5, color: T.ink, fontWeight: 500 }}>규칙에 동의하고 건강한 공동체에 함께해요</span>
+          </label>
+        </div>
+
+        <button onClick={save} disabled={!canSave} style={{ width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: canSave ? T.ink : T.line, color: canSave ? "#fff" : T.muted }}>{saving ? "저장 중…" : "시작하기"}</button>
       </div>
-      {sent && (
-        <div style={{ marginBottom: 16, animation: "rise .3s ease" }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={code} onChange={(e) => onCode(e.target.value)} placeholder="인증번호 6자리" inputMode="numeric" style={{ flex: 1, border: `1px solid ${ok ? T.sage : T.line}`, outline: "none", borderRadius: 11, padding: "12px 13px", fontSize: 15.5, color: T.ink, background: T.card, letterSpacing: 2 }} />
-            <button onClick={onVerify} disabled={!code} style={{ padding: "0 15px", borderRadius: 11, background: ok ? T.sage : (code ? T.gold : T.line), color: code || ok ? "#fff" : T.muted, fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>{ok ? <><Check size={14} /> 완료</> : "확인"}</button>
-          </div>
-          {ok && <p style={{ margin: "7px 2px 0", fontSize: 13, color: T.sage, fontWeight: 500, display: "flex", alignItems: "center", gap: 5 }}><ShieldCheck size={12} /> 인증되었어요</p>}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 9 }}><BackBtn onClick={onBack} /><NextBtn disabled={!ok} onClick={onNext}>다음</NextBtn></div>
     </div>
   );
 }
