@@ -4,7 +4,7 @@ import {
   Sprout, Star, NotebookPen, MessageCircle, Award, User, Play, Check, Heart,
   Send, ChevronRight, ChevronLeft, Mail, Phone, Calendar, ShieldCheck,
   Sparkles, Flame, TreePine, X, PenLine, Clock, RotateCcw, Sun, CloudRain,
-  Users, Plus, Copy, UserPlus, DoorOpen, Bell, Share2, Coffee, ExternalLink, Search, Lock
+  Users, Plus, Copy, UserPlus, DoorOpen, Bell, Share2, Coffee, ExternalLink, Search, Lock, HandHeart
 } from "lucide-react";
 
 /* ─────────────────────────────────────────────
@@ -21,7 +21,7 @@ const T = {
 const serif = "'Gowun Batang', serif";
 const sans = "'Noto Sans KR', sans-serif";
 
-/* 오늘의 신앙 훈련 — 일곱 가지 (pts: 완료 시 점수) */
+/* 오늘의 신앙 훈련 — 여덟 가지 (pts: 완료 시 점수) */
 const DIMS = [
   { key: "word", label: "말씀", icon: BookOpen, c: T.inkSoft, sub: "성경 본문 찾아 읽기", prompt: "오늘 읽은 본문과 마음에 남은 구절", pts: 10 },
   { key: "qt", label: "QT", icon: Coffee, c: T.violet, sub: "큐티 영상·묵상으로 하루 열기", prompt: "오늘 큐티에서 받은 은혜", pts: 10 },
@@ -29,6 +29,7 @@ const DIMS = [
   { key: "praise", label: "찬양", icon: Music, c: T.teal, sub: "노래로 드리는 예배", prompt: "오늘 부르거나 들은 찬양과 마음", pts: 10 },
   { key: "worship", label: "예배", icon: Church, c: T.goldDeep, sub: "주님 앞에 나아가기", prompt: "예배·설교에서 받은 은혜", pts: 10 },
   { key: "practice", label: "실천", icon: Footprints, c: T.sage, sub: "삶으로 살아내기", prompt: "오늘 실천한 사랑 한 가지", pts: 20 },
+  { key: "mission", label: "구제·선교", icon: HandHeart, c: "#4E7CA1", sub: "이웃과 열방을 품기", prompt: "오늘 나눈 사랑·품은 기도", pts: 20 },
   { key: "growth", label: "신앙계발", icon: Sprout, c: T.olive, sub: "배우며 자라기", prompt: "오늘 배우고 자란 것", pts: 10 },
 ];
 const DIM = Object.fromEntries(DIMS.map((d) => [d.key, d]));
@@ -129,6 +130,20 @@ const GROWTH_BOOKS = [
 const GROWTH_NEWS = [
   { t: "AI 시대, 신앙은 어떻게 응답할까", q: "기독교 AI 윤리" },
   { t: "이웃을 향한 나눔과 환대", q: "교회 지역사회 나눔" },
+];
+
+/* 구제·선교 */
+const MISSION_VERSE = { text: "너희가 여기 내 형제 중에 지극히 작은 자 하나에게 한 것이 곧 내게 한 것이니라", ref: "마태복음 25:40" };
+const MISSION_PRAYERS = [
+  "복음이 닿지 않은 미전도 종족을 위하여",
+  "파송된 선교사들의 건강과 안전을 위하여",
+  "전쟁·재난 지역의 이웃을 위하여",
+];
+const MISSION_IDEAS = ["작은 후원 한 곳 시작하기", "이웃에게 필요한 것 나누기", "선교 편지에 응원 답장하기", "한 끼 아껴 나눔에 보태기"];
+const MISSION_LINKS = [
+  { name: "월드비전", desc: "아동·구호 후원", url: "https://www.worldvision.or.kr" },
+  { name: "컴패션", desc: "1:1 어린이 양육", url: "https://www.compassion.or.kr" },
+  { name: "기아대책", desc: "국내외 구호·개발", url: "https://www.kfhi.or.kr" },
 ];
 
 /* 성경 66권 (이름, 장수) */
@@ -336,7 +351,7 @@ function Home(ctx) {
               })}
             </div>
             <p style={{ margin: "9px 0 0", fontSize: 12, color: "rgba(255,255,255,.75)" }}>
-              {doneCount === 7 ? "오늘의 일곱 훈련을 모두 밝혔어요 ✦" : <>오늘의 신앙 훈련 <b style={{ color: T.gold }}>{doneCount}</b> / 7</>}
+              {doneCount === DIMS.length ? "오늘의 신앙 훈련을 모두 밝혔어요 ✦" : <>오늘의 신앙 훈련 <b style={{ color: T.gold }}>{doneCount}</b> / {DIMS.length}</>}
             </p>
           </div>
         </div>
@@ -530,6 +545,39 @@ function renderContent(key, { openWeb }) {
         </div>
       </div>
     );
+  if (key === "mission")
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ background: "#4E7CA10F", borderRadius: 12, padding: "13px 14px", border: "1px solid #4E7CA133" }}>
+          <p style={{ fontFamily: serif, fontSize: 15, lineHeight: 1.6, color: T.ink, margin: 0 }}>"{MISSION_VERSE.text}"</p>
+          <p style={{ margin: "6px 0 0", fontSize: 11.5, color: "#4E7CA1", fontWeight: 700 }}>{MISSION_VERSE.ref}</p>
+        </div>
+        <div>
+          <p style={{ margin: "0 0 7px", fontSize: 12.5, fontWeight: 700, color: "#4E7CA1" }}>🙏 선교·구제 기도제목</p>
+          <div style={{ display: "grid", gap: 6 }}>
+            {MISSION_PRAYERS.map((p) => <InfoLine key={p} icon={HeartHandshake} text={p} c="#4E7CA1" />)}
+          </div>
+        </div>
+        <div>
+          <p style={{ margin: "0 0 8px", fontSize: 12.5, fontWeight: 700, color: "#4E7CA1" }}>🤲 오늘의 나눔 실천</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {MISSION_IDEAS.map((p) => <span key={p} style={{ fontSize: 12.5, color: "#3B617E", background: "#4E7CA114", borderRadius: 999, padding: "7px 13px", fontWeight: 500 }}>{p}</span>)}
+          </div>
+        </div>
+        <div>
+          <p style={{ margin: "0 0 7px", fontSize: 12.5, fontWeight: 700, color: "#4E7CA1" }}>🔗 후원·기부처</p>
+          <div style={{ display: "grid", gap: 6 }}>
+            {MISSION_LINKS.map((l) => (
+              <button key={l.name} onClick={() => openWeb(l.url, l.name)} style={{ display: "flex", alignItems: "center", gap: 9, textAlign: "left", background: T.card, borderRadius: 11, padding: "10px 12px", border: `1px solid ${T.line}` }}>
+                <HandHeart size={16} color="#4E7CA1" style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.ink }}>{l.name}</p><p style={{ margin: 0, fontSize: 11, color: T.muted }}>{l.desc}</p></div>
+                <ExternalLink size={14} color={T.muted} style={{ flexShrink: 0 }} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   if (key === "growth")
     return (
       <div style={{ display: "grid", gap: 14 }}>
@@ -687,7 +735,7 @@ function Journal({ journal, done7, doneCount }) {
           <StarField faint />
           <div style={{ position: "relative", zIndex: 2 }}>
             <p style={{ margin: 0, fontSize: 12, opacity: .75 }}>오늘의 신앙 훈련</p>
-            <p style={{ margin: "3px 0 12px", fontFamily: serif, fontSize: 22, fontWeight: 700 }}>{doneCount} <span style={{ fontSize: 14, opacity: .7 }}>/ 7 완료</span></p>
+            <p style={{ margin: "3px 0 12px", fontFamily: serif, fontSize: 22, fontWeight: 700 }}>{doneCount} <span style={{ fontSize: 14, opacity: .7 }}>/ {DIMS.length} 완료</span></p>
             <div style={{ display: "flex", gap: 6 }}>
               {DIMS.map((d) => {
                 const on = done7[d.key]; const Ic = d.icon;
