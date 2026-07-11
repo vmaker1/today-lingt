@@ -828,6 +828,8 @@ function Feed({ posts, setPosts, award }) {
     setText(""); setWriting(false); award(10, "오늘의 나눔");
   };
   const amen = (id) => setPosts((ps) => ps.map((p) => { if (p.id !== id) return p; if (!p.amened) award(2, "아멘으로 격려"); return { ...p, amen: p.amened ? p.amen - 1 : p.amen + 1, amened: !p.amened }; }));
+  const [reported, setReported] = useState(() => new Set());
+  const report = (id) => setReported((s) => new Set(s).add(id));
 
   return (
     <div>
@@ -854,7 +856,12 @@ function Feed({ posts, setPosts, award }) {
                 <div><p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{p.name}</p><p style={{ margin: 0, fontSize: 12, color: T.muted, display: "flex", alignItems: "center", gap: 4 }}><Clock size={10} /> {p.time}</p></div>
               </div>
               <p style={{ margin: "0 0 12px", fontSize: 15.5, lineHeight: 1.65, color: T.inkSoft }}>{p.text}</p>
-              <button onClick={() => amen(p.id)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: p.amened ? T.rose : T.muted }}><Heart size={15} fill={p.amened ? T.rose : "none"} color={p.amened ? T.rose : T.muted} /> 아멘 {p.amen}</button>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <button onClick={() => amen(p.id)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: p.amened ? T.rose : T.muted }}><Heart size={15} fill={p.amened ? T.rose : "none"} color={p.amened ? T.rose : T.muted} /> 아멘 {p.amen}</button>
+                {reported.has(p.id)
+                  ? <span style={{ fontSize: 12, color: T.muted }}>신고 접수됨</span>
+                  : <button onClick={() => report(p.id)} style={{ fontSize: 12.5, color: T.muted, fontWeight: 500 }}>신고</button>}
+              </div>
             </div>
           ))}
         </div>
@@ -948,8 +955,8 @@ function CreateRoomSheet({ onClose, onCreate }) {
   const [desc, setDesc] = useState("");
   return (
     <Sheet onClose={onClose} accent={T.violet} title={<><DoorOpen size={16} color={T.violet} /> 새로운 방 만들기</>}>
-      <p style={{ margin: "0 0 14px", fontSize: 14, color: T.muted }}>함께 신앙을 나눌 방을 만들어 친구를 초대해요.</p>
-      <Field icon={DoorOpen} label="방 이름" placeholder="예 · 우리 구역 새벽기도" value={name} onChange={setName} />
+      <p style={{ margin: "0 0 14px", fontSize: 14, color: T.muted }}>교회 모임이나 소모임 방을 만들어 지체들을 초대해요.</p>
+      <Field icon={DoorOpen} label="방 이름" placeholder="예 · 은혜교회 청년부 / 우리 구역 새벽기도" value={name} onChange={setName} />
       <Field icon={PenLine} label="방 소개 (선택)" placeholder="어떤 방인지 한 줄로 알려주세요" value={desc} onChange={setDesc} />
       <button onClick={() => name.trim() && onCreate(name.trim(), desc.trim())} disabled={!name.trim()} style={{ width: "100%", padding: "13px 0", marginTop: 6, borderRadius: 12, fontSize: 16, fontWeight: 700, background: name.trim() ? T.violet : T.line, color: name.trim() ? "#fff" : T.muted, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
         <Plus size={15} /> 방 만들기
@@ -989,6 +996,7 @@ function Messages({ threads, setThreads }) {
 
 function Thread({ thread, setThreads, onBack }) {
   const [text, setText] = useState("");
+  const [blocked, setBlocked] = useState(false);
   const send = () => {
     if (!text.trim()) return;
     setThreads((ts) => ts.map((t) => t.id === thread.id ? { ...t, msgs: [...t.msgs, { me: true, text: text.trim(), time: "방금" }] } : t));
@@ -999,8 +1007,11 @@ function Thread({ thread, setThreads, onBack }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, paddingBottom: 12, borderBottom: `1px solid ${T.line}`, marginBottom: 14 }}>
         <button onClick={onBack} style={{ padding: 2 }}><ChevronLeft size={22} color={T.muted} /></button>
         <Avatar init={thread.init} c={thread.c} />
-        <p style={{ margin: 0, fontSize: 16.5, fontWeight: 700, color: T.ink }}>{thread.name}</p>
+        <p style={{ margin: 0, flex: 1, fontSize: 16.5, fontWeight: 700, color: T.ink }}>{thread.name}</p>
+        <button onClick={() => setBlocked((b) => !b)} style={{ fontSize: 12.5, fontWeight: 600, color: blocked ? T.sage : T.rose }}>{blocked ? "차단됨" : "신고·차단"}</button>
       </div>
+
+      {blocked && <div style={{ background: `${T.rose}0F`, borderRadius: 11, padding: "11px 13px", marginBottom: 14, fontSize: 12.5, color: T.ink, lineHeight: 1.6 }}>신고가 접수되고 이 사용자를 차단했어요. 더 이상 쪽지를 받지 않아요. <span style={{ color: T.muted }}>(배포 후 실제 적용)</span></div>}
 
       <div style={{ display: "grid", gap: 9, paddingBottom: 12 }}>
         {thread.msgs.map((m, i) => (
@@ -1057,7 +1068,7 @@ function NotifSheet({ threads, rooms, onClose, onGo }) {
 /* ── 앱 초대 / 공유 ── */
 function InviteSheet({ onClose, share }) {
   const [copied, setCopied] = useState(false);
-  const link = "https://dawn.worship/invite/BELIEVE24";
+  const link = "https://today-light.vercel.app/";
   const copy = () => { try { navigator.clipboard?.writeText(link); } catch (e) {} setCopied(true); setTimeout(() => setCopied(false), 1600); };
   const opts = [
     { label: "카카오톡", c: "#FEE500", t: "#3A1D1D" },
@@ -1308,6 +1319,8 @@ function Me({ user, setUser, points }) {
 function Profile({ user, points, onOut }) {
   const st = stageInfo(points).current;
   const [invite, setInvite] = useState(false);
+  const [safety, setSafety] = useState(false);
+  const kakao = user.method === "kakao";
   return (
     <div>
       <div style={{ background: `linear-gradient(170deg, ${T.ink}, #3A335E)`, padding: "40px 24px 28px", color: "#fff", textAlign: "center", position: "relative", overflow: "hidden" }}>
@@ -1315,7 +1328,7 @@ function Profile({ user, points, onOut }) {
         <div style={{ position: "relative", zIndex: 2 }}>
           <div style={{ width: 66, height: 66, borderRadius: 999, background: T.gold, margin: "0 auto 12px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 700, color: T.ink, fontFamily: serif }}>{user.name[0]}</div>
           <h2 style={{ fontFamily: serif, fontSize: 23, margin: 0 }}>{user.name}님</h2>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 7, background: "rgba(255,255,255,.14)", padding: "4px 13px", borderRadius: 999, fontSize: 13.5 }}><ShieldCheck size={13} color={T.gold} /> 본인인증 완료 · {st.emoji} {st.stage}</div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 7, background: "rgba(255,255,255,.14)", padding: "4px 13px", borderRadius: 999, fontSize: 13.5 }}><ShieldCheck size={13} color={T.gold} /> {st.emoji} {st.stage} 단계</div>
         </div>
       </div>
       <div style={{ padding: 16 }}>
@@ -1328,14 +1341,48 @@ function Profile({ user, points, onOut }) {
           <ChevronRight size={18} color={T.goldDeep} />
         </button>
         <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.line}`, overflow: "hidden", marginBottom: 16 }}>
-          <InfoRow icon={Mail} label="이메일" value={user.email} />
-          <InfoRow icon={Phone} label="전화번호" value={user.phone} />
-          <InfoRow icon={Calendar} label="생년월일" value={user.birth} last />
+          <InfoRow icon={Church} label="소속 교회" value={user.church} />
+          <InfoRow icon={kakao ? MessageCircle : Mail} label="로그인" value={kakao ? "카카오 로그인" : user.email} last />
         </div>
+        <button onClick={() => setSafety(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: `${T.rose}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><ShieldCheck size={20} color={T.rose} /></div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>커뮤니티 규칙 · 신고 안내</p>
+            <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted }}>건강한 공동체를 함께 지켜요</p>
+          </div>
+          <ChevronRight size={18} color={T.muted} />
+        </button>
         <button onClick={onOut} style={{ width: "100%", padding: "12px 0", borderRadius: 11, fontSize: 14.5, fontWeight: 700, color: T.rose, background: T.card, border: `1px solid ${T.line}` }}>로그아웃</button>
       </div>
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
+      {safety && <SafetySheet onClose={() => setSafety(false)} />}
     </div>
+  );
+}
+
+function SafetySheet({ onClose }) {
+  const RULES = [
+    "서로를 존중하고 격려하는 말을 나눠요",
+    "비방·혐오·차별의 표현은 삼가요",
+    "다른 사람의 개인정보를 함부로 공유하지 않아요",
+    "부적절한 게시물·쪽지는 신고할 수 있어요",
+  ];
+  return (
+    <Sheet onClose={onClose} accent={T.rose} title={<><ShieldCheck size={16} color={T.rose} /> 커뮤니티 규칙 · 신고</>}>
+      <p style={{ margin: "0 0 14px", fontSize: 12.5, color: T.muted, lineHeight: 1.6 }}>여러 교회의 지체들이 함께 쓰는 공간이에요. 아래 규칙을 지키며 서로를 세워요.</p>
+      <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.line}`, padding: 16, marginBottom: 14 }}>
+        {RULES.map((r) => (
+          <div key={r} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 10 }}>
+            <span style={{ width: 5, height: 5, borderRadius: 999, background: T.gold, flexShrink: 0, marginTop: 7 }} />
+            <span style={{ fontSize: 13.5, color: T.inkSoft, lineHeight: 1.5 }}>{r}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ background: `${T.rose}0F`, borderRadius: 12, padding: "13px 14px", border: `1px solid ${T.rose}33` }}>
+        <p style={{ margin: 0, fontSize: 13, color: T.ink, lineHeight: 1.6 }}>글·쪽지 옆의 <b style={{ color: T.rose }}>신고</b>를 누르면 운영진에게 접수돼요. 반복·심각한 경우 해당 계정의 이용이 제한(정지)될 수 있어요.</p>
+      </div>
+      <p style={{ margin: "12px 2px 0", fontSize: 11.5, color: T.muted, textAlign: "center" }}>* 실제 신고 접수·계정 정지는 배포(서버 연동) 후 작동해요.</p>
+    </Sheet>
   );
 }
 
@@ -1349,54 +1396,71 @@ function InfoRow({ icon: Icon, label, value, last }) {
 }
 
 function SignUp({ onDone }) {
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState({ name: "", email: "", phone: "", birth: "" });
-  const [sent, setSent] = useState({ email: false, phone: false });
-  const [code, setCode] = useState({ email: "", phone: "" });
-  const [ok, setOk] = useState({ email: false, phone: false });
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const steps = ["약관", "이메일 인증", "휴대폰 인증", "정보 입력"];
+  const [step, setStep] = useState(0);        // 0 시작, 1 프로필
+  const [method, setMethod] = useState(null); // 'kakao' | 'email'
+  const [nick, setNick] = useState("");
+  const [church, setChurch] = useState("");
+  const [email, setEmail] = useState("");
+  const [agree, setAgree] = useState(false);
+
+  const RULES = [
+    "서로를 존중하고 격려하는 말을 나눠요",
+    "비방·혐오·차별의 표현은 삼가요",
+    "다른 사람의 개인정보를 함부로 공유하지 않아요",
+    "부적절한 행동은 신고할 수 있고, 심하면 이용이 제한돼요",
+  ];
+  const start = (m) => { setMethod(m); setStep(1); };
+  const canJoin = nick.trim() && agree && (method !== "email" || email.trim());
 
   return (
     <div>
-      <Header title="회원가입" subtitle="크리스천 지체로 함께해요" />
+      <Header title="함께 시작하기" subtitle="여러 교회의 지체들이 함께하는 공간" />
       <div style={{ padding: "0 16px" }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
-          {steps.map((s, i) => (
-            <div key={s} style={{ flex: 1 }}>
-              <div style={{ height: 4, borderRadius: 999, background: i <= step ? T.gold : T.line, transition: "background .3s" }} />
-              <p style={{ margin: "5px 0 0", fontSize: 11.5, textAlign: "center", color: i <= step ? T.ink : T.muted, fontWeight: i === step ? 700 : 400 }}>{s}</p>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 9, background: T.goldSoft, borderRadius: 11, padding: "11px 13px", marginBottom: 18 }}>
-          <ShieldCheck size={17} color={T.gold} style={{ flexShrink: 0, marginTop: 1 }} />
-          <p style={{ margin: 0, fontSize: 13, color: T.ink, lineHeight: 1.5 }}>이메일·휴대폰·생년월일로 본인인증을 진행해요. <b>지금은 데모</b>라 인증번호에 아무 숫자나 넣어도 통과돼요.</p>
+        <div style={{ background: `linear-gradient(150deg, #FFFDF7, ${T.goldSoft})`, borderRadius: 14, padding: "16px", border: `1px solid ${T.goldSoft}`, textAlign: "center", marginBottom: 18 }}>
+          <p style={{ fontFamily: serif, fontSize: 16, lineHeight: 1.7, color: T.ink, margin: 0 }}>"수고하고 무거운 짐 진 자들아<br />다 내게로 오라. 내가 너희를 쉬게 하리라"</p>
+          <p style={{ margin: "9px 0 0", fontSize: 12.5, color: T.goldDeep, fontWeight: 700 }}>마태복음 11:28 · 함께 걸어요</p>
         </div>
 
         {step === 0 && (
           <div>
-            <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.line}`, padding: 16, marginBottom: 16 }}>
-              {["만 14세 이상이며 서비스 이용약관에 동의합니다.", "개인정보 수집·이용에 동의합니다.", "본인 명의의 정보로 인증함에 동의합니다."].map((t, i) => (
-                <label key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 0", borderBottom: i < 2 ? `1px solid ${T.line}` : "none", cursor: "pointer" }}>
-                  <span style={{ width: 19, height: 19, borderRadius: 6, background: T.sage, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}><Check size={12} color="#fff" /></span>
-                  <span style={{ fontSize: 14, color: T.inkSoft, lineHeight: 1.5 }}>{t}</span>
-                </label>
-              ))}
-            </div>
-            <NextBtn onClick={() => setStep(1)}>동의하고 시작하기</NextBtn>
+            <button onClick={() => start("kakao")} style={{ width: "100%", padding: "15px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: "#FEE500", color: "#3A1D1D", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 10 }}>
+              <MessageCircle size={18} fill="#3A1D1D" color="#3A1D1D" /> 카카오로 시작하기
+            </button>
+            <button onClick={() => start("email")} style={{ width: "100%", padding: "15px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: T.card, color: T.ink, border: `1px solid ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <Mail size={17} color={T.ink} /> 이메일로 시작하기
+            </button>
+            <p style={{ margin: "16px 6px 0", fontSize: 12.5, color: T.muted, lineHeight: 1.6, textAlign: "center" }}>시작하면 <b style={{ color: T.inkSoft }}>이용약관</b>과 <b style={{ color: T.inkSoft }}>커뮤니티 규칙</b>에 동의하는 것으로 여겨요.</p>
+            <p style={{ margin: "6px 6px 0", fontSize: 11.5, color: T.muted, textAlign: "center" }}>* 지금은 데모라 실제 로그인 없이 다음으로 넘어가요.</p>
           </div>
         )}
-        {step === 1 && <VerifyStep icon={Mail} label="이메일" placeholder="name@example.com" type="email" value={form.email} onChange={(v) => set("email", v)} sent={sent.email} onSend={() => setSent((s) => ({ ...s, email: true }))} code={code.email} onCode={(v) => setCode((c) => ({ ...c, email: v }))} ok={ok.email} onVerify={() => setOk((o) => ({ ...o, email: true }))} onNext={() => setStep(2)} onBack={() => setStep(0)} />}
-        {step === 2 && <VerifyStep icon={Phone} label="휴대폰 번호" placeholder="010-0000-0000" type="tel" value={form.phone} onChange={(v) => set("phone", v)} sent={sent.phone} onSend={() => setSent((s) => ({ ...s, phone: true }))} code={code.phone} onCode={(v) => setCode((c) => ({ ...c, phone: v }))} ok={ok.phone} onVerify={() => setOk((o) => ({ ...o, phone: true }))} onNext={() => setStep(3)} onBack={() => setStep(1)} />}
-        {step === 3 && (
+
+        {step === 1 && (
           <div>
-            <Field icon={User} label="이름" placeholder="홍길동" value={form.name} onChange={(v) => set("name", v)} />
-            <Field icon={Calendar} label="생년월일" placeholder="YYYY-MM-DD" value={form.birth} onChange={(v) => set("birth", v)} />
-            <div style={{ background: T.sageSoft, borderRadius: 11, padding: "11px 13px", margin: "4px 0 16px", display: "flex", gap: 8, alignItems: "center" }}><ShieldCheck size={16} color={T.sage} /><span style={{ fontSize: 13.5, color: "#3E5A44", fontWeight: 500 }}>이메일·휴대폰 인증 완료됨</span></div>
+            <div style={{ background: T.sageSoft, borderRadius: 11, padding: "11px 13px", marginBottom: 16, display: "flex", gap: 8, alignItems: "center" }}>
+              <ShieldCheck size={16} color={T.sage} />
+              <span style={{ fontSize: 13.5, color: "#3E5A44", fontWeight: 500 }}>{method === "kakao" ? "카카오 계정 연결됨" : "이메일로 가입"}</span>
+            </div>
+            <Field icon={User} label="닉네임" placeholder="공동체에서 불릴 이름" value={nick} onChange={setNick} />
+            <Field icon={Church} label="소속 교회 (선택)" placeholder="예 · 은혜교회 중고등부" value={church} onChange={setChurch} />
+            {method === "email" && <Field icon={Mail} label="이메일" placeholder="name@example.com" value={email} onChange={setEmail} />}
+
+            <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.line}`, padding: "15px 15px 6px", marginBottom: 16 }}>
+              <p style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>함께 지킬 커뮤니티 규칙</p>
+              {RULES.map((r) => (
+                <div key={r} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 9 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: 999, background: T.gold, flexShrink: 0, marginTop: 7 }} />
+                  <span style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.5 }}>{r}</span>
+                </div>
+              ))}
+              <label onClick={() => setAgree((a) => !a)} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0 6px", borderTop: `1px solid ${T.line}`, cursor: "pointer" }}>
+                <span style={{ width: 22, height: 22, borderRadius: 7, background: agree ? T.sage : "#fff", border: `1px solid ${agree ? T.sage : T.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{agree && <Check size={14} color="#fff" />}</span>
+                <span style={{ fontSize: 13.5, color: T.ink, fontWeight: 500 }}>규칙에 동의하고 건강한 공동체에 함께해요</span>
+              </label>
+            </div>
+
             <div style={{ display: "flex", gap: 9 }}>
-              <BackBtn onClick={() => setStep(2)} />
-              <NextBtn disabled={!form.name || !form.birth} onClick={() => onDone({ name: form.name, email: form.email || "name@example.com", phone: form.phone || "010-0000-0000", birth: form.birth })}>가입 완료</NextBtn>
+              <BackBtn onClick={() => setStep(0)} />
+              <NextBtn disabled={!canJoin} onClick={() => onDone({ name: nick.trim(), church: church.trim() || "미입력", method, email: method === "email" ? email.trim() : "카카오 계정 연결" })}>가입 완료</NextBtn>
             </div>
           </div>
         )}
