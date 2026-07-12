@@ -87,7 +87,139 @@ const FRUITS = [
 const FRUIT = Object.fromEntries(FRUITS.map((f) => [f.key, f]));
 const GROW_STEPS = ["물 주기", "양분 주기", "수확하기"];
 
-const TODAY_VERSE = { text: "아침에 나로 하여금 주의 인자한 말씀을 듣게 하소서", ref: "시편 143:8" };
+/* 오늘의 암송 구절 — 날짜에 따라 매일 바뀜
+   ko: 개역한글(1961) · web: World English Bible · asv: American Standard Version
+   세 번역 모두 저작권이 만료·포기된 공개 도메인이라 자유롭게 사용할 수 있어요. */
+const VERSES = [
+  { ref: "요한복음 3:16", refEn: "John 3:16",
+    ko: "하나님이 세상을 이처럼 사랑하사 독생자를 주셨으니 이는 저를 믿는 자마다 멸망치 않고 영생을 얻게 하려 하심이니라",
+    web: "For God so loved the world, that he gave his one and only Son, that whoever believes in him should not perish, but have eternal life.",
+    asv: "For God so loved the world, that he gave his only begotten Son, that whosoever believeth on him should not perish, but have eternal life." },
+  { ref: "시편 23:1", refEn: "Psalm 23:1",
+    ko: "여호와는 나의 목자시니 내가 부족함이 없으리로다",
+    web: "Yahweh is my shepherd; I shall lack nothing.",
+    asv: "Jehovah is my shepherd; I shall not want." },
+  { ref: "빌립보서 4:13", refEn: "Philippians 4:13",
+    ko: "내게 능력 주시는 자 안에서 내가 모든 것을 할 수 있느니라",
+    web: "I can do all things through Christ, who strengthens me.",
+    asv: "I can do all things in him that strengtheneth me." },
+  { ref: "마태복음 11:28", refEn: "Matthew 11:28",
+    ko: "수고하고 무거운 짐 진 자들아 다 내게로 오라 내가 너희를 쉬게 하리라",
+    web: "Come to me, all you who labor and are heavily burdened, and I will give you rest.",
+    asv: "Come unto me, all ye that labor and are heavy laden, and I will give you rest." },
+  { ref: "시편 119:105", refEn: "Psalm 119:105",
+    ko: "주의 말씀은 내 발에 등이요 내 길에 빛이니이다",
+    web: "Your word is a lamp to my feet, and a light for my path.",
+    asv: "Thy word is a lamp unto my feet, and light unto my path." },
+  { ref: "이사야 41:10", refEn: "Isaiah 41:10",
+    ko: "두려워 말라 내가 너와 함께 함이니라 놀라지 말라 나는 네 하나님이 됨이니라 내가 너를 굳세게 하리라",
+    web: "Don't you be afraid, for I am with you. Don't be dismayed, for I am your God. I will strengthen you.",
+    asv: "Fear thou not, for I am with thee; be not dismayed, for I am thy God; I will strengthen thee." },
+  { ref: "잠언 3:5", refEn: "Proverbs 3:5",
+    ko: "너는 마음을 다하여 여호와를 의뢰하고 네 명철을 의지하지 말라",
+    web: "Trust in Yahweh with all your heart, and don't lean on your own understanding.",
+    asv: "Trust in Jehovah with all thy heart, and lean not upon thine own understanding." },
+  { ref: "로마서 8:28", refEn: "Romans 8:28",
+    ko: "우리가 알거니와 하나님을 사랑하는 자 곧 그 뜻대로 부르심을 입은 자들에게는 모든 것이 합력하여 선을 이루느니라",
+    web: "We know that all things work together for good for those who love God, for those who are called according to his purpose.",
+    asv: "And we know that to them that love God all things work together for good, even to them that are called according to his purpose." },
+  { ref: "빌립보서 4:6", refEn: "Philippians 4:6",
+    ko: "아무 것도 염려하지 말고 오직 모든 일에 기도와 간구로 너희 구할 것을 감사함으로 하나님께 아뢰라",
+    web: "In nothing be anxious, but in everything, by prayer and petition with thanksgiving, let your requests be made known to God.",
+    asv: "In nothing be anxious; but in everything by prayer and supplication with thanksgiving let your requests be made known unto God." },
+  { ref: "이사야 40:31", refEn: "Isaiah 40:31",
+    ko: "오직 여호와를 앙망하는 자는 새 힘을 얻으리니 독수리의 날개치며 올라감 같을 것이요",
+    web: "But those who wait for Yahweh will renew their strength. They will mount up with wings like eagles.",
+    asv: "But they that wait for Jehovah shall renew their strength; they shall mount up with wings as eagles." },
+  { ref: "고린도전서 13:4", refEn: "1 Corinthians 13:4",
+    ko: "사랑은 오래 참고 사랑은 온유하며 투기하는 자가 되지 아니하며 사랑은 자랑하지 아니하며 교만하지 아니하며",
+    web: "Love is patient and is kind. Love doesn't envy. Love doesn't brag, is not proud.",
+    asv: "Love suffereth long, and is kind; love envieth not; love vaunteth not itself, is not puffed up." },
+  { ref: "마태복음 6:33", refEn: "Matthew 6:33",
+    ko: "너희는 먼저 그의 나라와 그의 의를 구하라 그리하면 이 모든 것을 너희에게 더하시리라",
+    web: "But seek first God's Kingdom and his righteousness; and all these things will be given to you as well.",
+    asv: "But seek ye first his kingdom, and his righteousness; and all these things shall be added unto you." },
+  { ref: "여호수아 1:9", refEn: "Joshua 1:9",
+    ko: "마음을 강하게 하고 담대히 하라 두려워 말며 놀라지 말라 네가 어디로 가든지 네 하나님 여호와가 너와 함께 하느니라",
+    web: "Be strong and courageous. Don't be afraid. Don't be dismayed, for Yahweh your God is with you wherever you go.",
+    asv: "Be strong and of good courage; be not affrighted, neither be thou dismayed: for Jehovah thy God is with thee whithersoever thou goest." },
+  { ref: "시편 46:1", refEn: "Psalm 46:1",
+    ko: "하나님은 우리의 피난처시요 힘이시니 환난 중에 만날 큰 도움이시라",
+    web: "God is our refuge and strength, a very present help in trouble.",
+    asv: "God is our refuge and strength, a very present help in trouble." },
+  { ref: "베드로전서 5:7", refEn: "1 Peter 5:7",
+    ko: "너희 염려를 다 주께 맡겨 버리라 이는 저가 너희를 권고하심이니라",
+    web: "Cast all your worries on him, because he cares for you.",
+    asv: "Casting all your anxiety upon him, because he careth for you." },
+  { ref: "갈라디아서 5:22", refEn: "Galatians 5:22",
+    ko: "오직 성령의 열매는 사랑과 희락과 화평과 오래 참음과 자비와 양선과 충성과",
+    web: "But the fruit of the Spirit is love, joy, peace, patience, kindness, goodness, faith.",
+    asv: "But the fruit of the Spirit is love, joy, peace, longsuffering, kindness, goodness, faithfulness." },
+  { ref: "예레미야애가 3:22-23", refEn: "Lamentations 3:22-23",
+    ko: "여호와의 인자와 긍휼이 무궁하시므로 우리가 진멸되지 아니함이니이다 이것이 아침마다 새로우니 주의 성실이 크도소이다",
+    web: "It is because of Yahweh's loving kindnesses that we are not consumed, because his compassion doesn't fail. They are new every morning. Great is your faithfulness.",
+    asv: "It is of Jehovah's lovingkindnesses that we are not consumed, because his compassions fail not. They are new every morning; great is thy faithfulness." },
+  { ref: "마태복음 5:14", refEn: "Matthew 5:14",
+    ko: "너희는 세상의 빛이라 산 위에 있는 동네가 숨기우지 못할 것이요",
+    web: "You are the light of the world. A city located on a hill can't be hidden.",
+    asv: "Ye are the light of the world. A city set on a hill cannot be hid." },
+  { ref: "시편 27:1", refEn: "Psalm 27:1",
+    ko: "여호와는 나의 빛이요 나의 구원이시니 내가 누구를 두려워하리요",
+    web: "Yahweh is my light and my salvation. Whom shall I fear?",
+    asv: "Jehovah is my light and my salvation; whom shall I fear?" },
+  { ref: "잠언 16:3", refEn: "Proverbs 16:3",
+    ko: "너의 행사를 여호와께 맡기라 그리하면 너의 경영하는 것이 이루리라",
+    web: "Commit your deeds to Yahweh, and your plans shall succeed.",
+    asv: "Commit thy works unto Jehovah, and thy purposes shall be established." },
+  { ref: "데살로니가전서 5:16-18", refEn: "1 Thessalonians 5:16-18",
+    ko: "항상 기뻐하라 쉬지 말고 기도하라 범사에 감사하라 이는 그리스도 예수 안에서 너희를 향하신 하나님의 뜻이니라",
+    web: "Always rejoice. Pray without ceasing. In everything give thanks, for this is the will of God in Christ Jesus toward you.",
+    asv: "Rejoice always; pray without ceasing; in everything give thanks: for this is the will of God in Christ Jesus to you-ward." },
+  { ref: "마태복음 28:20", refEn: "Matthew 28:20",
+    ko: "볼지어다 내가 세상 끝날까지 너희와 항상 함께 있으리라",
+    web: "Behold, I am with you always, even to the end of the age.",
+    asv: "and lo, I am with you always, even unto the end of the world." },
+  { ref: "요한복음 13:34", refEn: "John 13:34",
+    ko: "새 계명을 너희에게 주노니 서로 사랑하라 내가 너희를 사랑한 것 같이 너희도 서로 사랑하라",
+    web: "A new commandment I give to you, that you love one another. Just as I have loved you, you also love one another.",
+    asv: "A new commandment I give unto you, that ye love one another; even as I have loved you, that ye also love one another." },
+  { ref: "히브리서 11:1", refEn: "Hebrews 11:1",
+    ko: "믿음은 바라는 것들의 실상이요 보지 못하는 것들의 증거니",
+    web: "Now faith is assurance of things hoped for, proof of things not seen.",
+    asv: "Now faith is assurance of things hoped for, a conviction of things not seen." },
+  { ref: "마태복음 25:40", refEn: "Matthew 25:40",
+    ko: "너희가 여기 내 형제 중에 지극히 작은 자 하나에게 한 것이 곧 내게 한 것이니라",
+    web: "Most certainly I tell you, because you did it to one of the least of these my brothers, you did it to me.",
+    asv: "Verily I say unto you, Inasmuch as ye did it unto one of these my brethren, even these least, ye did it unto me." },
+  { ref: "시편 121:1-2", refEn: "Psalm 121:1-2",
+    ko: "내가 산을 향하여 눈을 들리라 나의 도움이 어디서 올꼬 나의 도움이 천지를 지으신 여호와에게서로다",
+    web: "I will lift up my eyes to the hills. Where does my help come from? My help comes from Yahweh, who made heaven and earth.",
+    asv: "I will lift up mine eyes unto the mountains: From whence shall my help come? My help cometh from Jehovah, who made heaven and earth." },
+  { ref: "고린도후서 12:9", refEn: "2 Corinthians 12:9",
+    ko: "내 은혜가 네게 족하도다 이는 내 능력이 약한 데서 온전하여짐이라",
+    web: "My grace is sufficient for you, for my power is made perfect in weakness.",
+    asv: "My grace is sufficient for thee: for my power is made perfect in weakness." },
+  { ref: "잠언 4:23", refEn: "Proverbs 4:23",
+    ko: "무릇 지킬 만한 것보다 더욱 네 마음을 지키라 생명의 근원이 이에서 남이니라",
+    web: "Keep your heart with all diligence, for out of it is the wellspring of life.",
+    asv: "Keep thy heart with all diligence; for out of it are the issues of life." },
+  { ref: "고린도전서 13:13", refEn: "1 Corinthians 13:13",
+    ko: "그런즉 믿음, 소망, 사랑 이 세 가지는 항상 있을 것인데 그 중의 제일은 사랑이라",
+    web: "But now faith, hope, and love remain—these three. The greatest of these is love.",
+    asv: "But now abideth faith, hope, love, these three; and the greatest of these is love." },
+  { ref: "시편 37:5", refEn: "Psalm 37:5",
+    ko: "너의 길을 여호와께 맡기라 저를 의지하면 저가 이루시고",
+    web: "Commit your way to Yahweh. Trust also in him, and he will do this.",
+    asv: "Commit thy way unto Jehovah; Trust also in him, and he will bring it to pass." },
+];
+const BIBLE_VERSIONS = [
+  { key: "ko", label: "개역한글" },
+  { key: "web", label: "WEB" },
+  { key: "asv", label: "ASV" },
+];
+/* 오늘 날짜 기준으로 구절 고르기 (매일 자동으로 바뀜) */
+const dayIndex = () => Math.floor((Date.now() + 9 * 3600e3) / 86400e3); // 한국 기준 일수
+const TODAY_VERSE = VERSES[dayIndex() % VERSES.length];
 
 /* 오늘 서울 날씨 (데모 · 실제로는 기상 API로 매일 갱신) */
 const WEATHER = { region: "서울", label: "흐리고 비", temp: 28, icon: CloudRain };
@@ -418,6 +550,9 @@ function TrainCard({ dim, done, wide, onClick }) {
 
 function MemorizeCard({ verse, done, streak, onDone }) {
   const [open, setOpen] = useState(false);
+  const [ver, setVer] = useState("ko");
+  const text = verse[ver];
+  const ref = ver === "ko" ? verse.ref : verse.refEn;
   return (
     <div>
       <div style={{ background: `linear-gradient(150deg, #FFFDF7, ${T.goldSoft})`, borderRadius: 16, padding: "14px 16px", border: `1px solid ${T.goldSoft}`, boxShadow: "0 2px 10px rgba(217,164,65,.1)" }}>
@@ -425,13 +560,18 @@ function MemorizeCard({ verse, done, streak, onDone }) {
           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 700, color: T.goldDeep }}><Feather size={13} /> 오늘의 말씀 암송</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 13.5, fontWeight: 700, color: T.rose }}><Flame size={13} fill={T.rose} color={T.rose} /> {streak}일</span>
         </div>
-        <p style={{ fontFamily: serif, fontSize: 18.5, lineHeight: 1.55, color: T.ink, margin: "0 0 4px" }}>"{verse.text}"</p>
-        <p style={{ margin: "0 0 12px", fontSize: 13.5, color: T.goldDeep, fontWeight: 700 }}>{verse.ref}</p>
+        <div style={{ display: "flex", gap: 4, marginBottom: 9 }}>
+          {BIBLE_VERSIONS.map((v) => (
+            <button key={v.key} onClick={() => setVer(v.key)} style={{ fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 999, background: ver === v.key ? T.goldDeep : "rgba(255,255,255,.7)", color: ver === v.key ? "#fff" : T.goldDeep, border: `1px solid ${ver === v.key ? T.goldDeep : T.goldSoft}` }}>{v.label}</button>
+          ))}
+        </div>
+        <p style={{ fontFamily: serif, fontSize: ver === "ko" ? 18.5 : 16, lineHeight: 1.55, color: T.ink, margin: "0 0 4px" }}>"{text}"</p>
+        <p style={{ margin: "0 0 12px", fontSize: 13.5, color: T.goldDeep, fontWeight: 700 }}>{ref}</p>
         <button onClick={() => setOpen(true)} disabled={done} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 14.5, fontWeight: 700, background: done ? "rgba(95,132,104,.14)" : T.ink, color: done ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
           {done ? <><Check size={15} /> 오늘 암송 완료 · 🔥 {streak}일</> : <><Feather size={14} /> 암송 연습하기 · +5P</>}
         </button>
       </div>
-      {open && <MemorizeModal verse={verse} done={done} onClose={() => setOpen(false)} onDone={() => { onDone(); setOpen(false); }} />}
+      {open && <MemorizeModal verse={{ text, ref }} done={done} onClose={() => setOpen(false)} onDone={() => { onDone(); setOpen(false); }} />}
     </div>
   );
 }
@@ -1435,7 +1575,7 @@ function SignIn() {
     setErr("");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "kakao",
-      options: { redirectTo: window.location.origin, scopes: "profile_nickname" },
+      options: { redirectTo: window.location.origin },
     });
     if (error) setErr(error.message);
   };
