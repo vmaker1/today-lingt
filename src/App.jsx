@@ -1385,11 +1385,11 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
   const { current, prevDays } = stageInfo(faithDays);
   const span = current.days - prevDays;
   const pct = span > 0 ? Math.min(100, ((faithDays - prevDays) / span) * 100) : 100;
-  const week = [45, 30, 60, 0, 40, 0, todayPts];
   const [fruitOpen, setFruitOpen] = useState(false);
   const todayPct = Math.min(100, (todayPts / dailyGoal) * 100);
   const [goalOpen, setGoalOpen] = useState(false);
   const [allStages, setAllStages] = useState(false);
+  const [statOpen, setStatOpen] = useState(false);
   const myGoal = GOAL_OPTIONS.find((g) => g.pts === dailyGoal) || GOAL_OPTIONS[1];
 
   return (
@@ -1419,7 +1419,7 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
         <div style={{ background: T.card, borderRadius: 16, padding: 16, border: `1px solid ${T.line}`, marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 700, color: T.ink }}><span style={{ fontSize: 17 }}>{current.emoji}</span>{current.stage} · {current.label}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: T.gold }}>총 {points}P</span>
+            <button onClick={() => setStatOpen(true)} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 13, fontWeight: 700, color: T.gold }}>총 {points}P <ChevronRight size={14} /></button>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
             <span style={{ fontFamily: serif, fontSize: 30, fontWeight: 700, color: T.ink }}>{faithDays}</span>
@@ -1430,18 +1430,6 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
             <span>{faithDays >= current.days ? "달성 ✦" : `${current.days - faithDays}일 더 · 총 ${current.days}일`}</span>
           </div>
           <div style={{ height: 7, borderRadius: 999, background: "#F1EDE3" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${T.gold}, ${T.goldGlow})`, transition: "width .6s ease" }} /></div>
-        </div>
-
-        <div style={{ background: T.card, borderRadius: 16, padding: 16, border: `1px solid ${T.line}`, marginBottom: 16 }}>
-          <p style={{ margin: "0 0 13px", fontSize: 14, fontWeight: 700, color: T.ink }}>이번 주 활동</p>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 9, height: 80 }}>
-            {week.map((v, i) => (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-                <div style={{ width: "100%", height: `${Math.max(6, (v / 60) * 100)}%`, borderRadius: 5, background: i === 6 ? T.gold : v ? T.sageSoft : "#F1EDE3", transition: "height .5s ease" }} />
-                <span style={{ fontSize: 11.5, color: T.muted }}>{["월", "화", "수", "목", "금", "토", "일"][i]}</span>
-              </div>
-            ))}
-          </div>
         </div>
 
         <button onClick={() => setFruitOpen(true)} style={{ width: "100%", textAlign: "left", background: `linear-gradient(150deg, #F6F1FA, #EFE7F5)`, borderRadius: 16, padding: 16, border: `1px solid #E3DAF0`, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
@@ -1505,27 +1493,153 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
             <ChevronRight size={15} style={{ transform: allStages ? "rotate(-90deg)" : "rotate(90deg)", transition: "transform .2s" }} />
           </button>
         </div>
-
-        <p style={{ margin: "0 0 11px", fontSize: 14, fontWeight: 700, color: T.ink }}>적립 내역</p>
-        {log.length === 0 ? (
-          <Empty icon={Feather} text={"아직 오늘의 첫 걸음 전이에요.\n홈에서 훈련을 시작해 보세요."} />
-        ) : (
-          <div style={{ display: "grid", gap: 7, paddingBottom: 6 }}>
-            {log.map((e) => (
-              <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: T.card, borderRadius: 11, padding: "11px 14px", border: `1px solid ${T.line}` }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 8, background: T.goldSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><Sparkles size={14} color={T.gold} /></div>
-                  <div><p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: T.ink }}>{e.label}</p><p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{e.time}</p></div>
-                </div>
-                <span style={{ fontSize: 14.5, fontWeight: 700, color: T.sage }}>+{e.pts}P</span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {fruitOpen && <FruitChallenge onClose={() => setFruitOpen(false)} earnedFruits={earnedFruits} growingFruit={growingFruit} growStep={growStep} selectFruit={selectFruit} growAction={growAction} harvestFruit={harvestFruit} />}
       {goalOpen && <GoalSheet current={dailyGoal} onPick={(g) => { setDailyGoal(g); setGoalOpen(false); }} onClose={() => setGoalOpen(false)} />}
+      {statOpen && <StatSheet onClose={() => setStatOpen(false)} points={points} log={log} dailyGoal={dailyGoal} faithDays={faithDays} />}
+    </div>
+  );
+}
+
+/* 상세 보기 — 달력 · 훈련별 합계 · 적립 내역 */
+function StatSheet({ onClose, points, log, dailyGoal, faithDays }) {
+  const [logs, setLogs] = useState([]);      // daily_logs
+  const [jour, setJour] = useState([]);      // journal (훈련별 합계용)
+  const [month, setMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u?.user?.id;
+      if (!uid) { setLoading(false); return; }
+      const { data: dl } = await supabase.from("daily_logs").select("day, today_pts, goal_hit, done_dims").eq("user_id", uid);
+      const { data: jr } = await supabase.from("journal").select("dim").eq("user_id", uid);
+      setLogs(dl || []); setJour(jr || []); setLoading(false);
+    })();
+  }, []);
+
+  const byDay = Object.fromEntries(logs.map((l) => [l.day, l]));
+  const first = new Date(month.y, month.m, 1);
+  const daysInMonth = new Date(month.y, month.m + 1, 0).getDate();
+  const startDow = first.getDay(); // 0=일
+  const cells = [...Array(startDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const ymd = (d) => `${month.y}-${String(month.m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const monthLogs = logs.filter((l) => l.day.startsWith(`${month.y}-${String(month.m + 1).padStart(2, "0")}`));
+  const monthHit = monthLogs.filter((l) => l.goal_hit).length;
+  const monthPts = monthLogs.reduce((a, l) => a + (l.today_pts || 0), 0);
+
+  // 훈련별 합계 (완료 횟수 × 점수)
+  const dimCount = {};
+  logs.forEach((l) => (l.done_dims || []).forEach((k) => { dimCount[k] = (dimCount[k] || 0) + 1; }));
+  const dimStats = DIMS.map((d) => ({ ...d, count: dimCount[d.key] || 0, total: (dimCount[d.key] || 0) * d.pts }))
+    .sort((a, b) => b.total - a.total);
+  const maxTotal = Math.max(1, ...dimStats.map((d) => d.total));
+
+  const shift = (n) => setMonth((mm) => {
+    const d = new Date(mm.y, mm.m + n, 1);
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 65, background: T.paper, overflowY: "auto", display: "flex", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 400, paddingBottom: 40 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${T.line}`, position: "sticky", top: 0, background: T.paper, zIndex: 2 }}>
+          <button onClick={onClose}><ChevronLeft size={22} color={T.ink} /></button>
+          <span style={{ flex: 1, fontSize: 16.5, fontWeight: 700, color: T.ink }}>나의 기록</span>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: T.gold }}>총 {points}P</span>
+        </div>
+
+        <div style={{ padding: "16px" }}>
+          {/* 요약 */}
+          <div style={{ display: "flex", gap: 9, marginBottom: 16 }}>
+            {[
+              { v: faithDays, l: "성실한 날", c: T.gold },
+              { v: monthHit, l: "이번 달 달성", c: T.sage },
+              { v: monthPts, l: "이번 달 점수", c: T.violet },
+            ].map((x) => (
+              <div key={x.l} style={{ flex: 1, background: T.card, borderRadius: 13, border: `1px solid ${T.line}`, padding: "13px 8px", textAlign: "center" }}>
+                <p style={{ margin: 0, fontFamily: serif, fontSize: 22, fontWeight: 700, color: x.c }}>{x.v}</p>
+                <p style={{ margin: "2px 0 0", fontSize: 11.5, color: T.muted }}>{x.l}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* 달력 */}
+          <div style={{ background: T.card, borderRadius: 16, border: `1px solid ${T.line}`, padding: 16, marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <button onClick={() => shift(-1)} style={{ padding: 4 }}><ChevronLeft size={18} color={T.muted} /></button>
+              <span style={{ fontSize: 14.5, fontWeight: 700, color: T.ink }}>{month.y}년 {month.m + 1}월</span>
+              <button onClick={() => shift(1)} style={{ padding: 4 }}><ChevronRight size={18} color={T.muted} /></button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 6 }}>
+              {["일", "월", "화", "수", "목", "금", "토"].map((d) => (
+                <span key={d} style={{ fontSize: 11, color: T.muted, textAlign: "center", fontWeight: 600 }}>{d}</span>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+              {cells.map((d, i) => {
+                if (!d) return <div key={`e${i}`} />;
+                const rec = byDay[ymd(d)];
+                const pts = rec?.today_pts || 0;
+                const hit = rec?.goal_hit;
+                const ratio = Math.min(1, pts / dailyGoal);
+                const bg = hit ? T.sage : pts > 0 ? `rgba(217,164,65,${0.2 + ratio * 0.5})` : "#F4F0E6";
+                const isToday = ymd(d) === todayKey();
+                return (
+                  <div key={d} title={`${pts}P`} style={{ aspectRatio: "1", borderRadius: 8, background: bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", border: isToday ? `2px solid ${T.ink}` : "none" }}>
+                    <span style={{ fontSize: 11.5, fontWeight: hit ? 700 : 500, color: hit ? "#fff" : pts > 0 ? T.ink : T.muted }}>{d}</span>
+                    {pts > 0 && <span style={{ fontSize: 8.5, color: hit ? "rgba(255,255,255,.85)" : T.muted }}>{pts}</span>}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 12, marginTop: 12, justifyContent: "center", fontSize: 11, color: T.muted }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: T.sage }} /> 목표 달성</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "rgba(217,164,65,.5)" }} /> 일부 완료</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#F4F0E6" }} /> 쉼</span>
+            </div>
+          </div>
+
+          {/* 훈련별 합계 */}
+          <div style={{ background: T.card, borderRadius: 16, border: `1px solid ${T.line}`, padding: 16, marginBottom: 16 }}>
+            <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 700, color: T.ink }}>훈련별 합계</p>
+            <p style={{ margin: "0 0 13px", fontSize: 12, color: T.muted }}>어떤 훈련에 많이 머물렀는지 볼 수 있어요</p>
+            {loading ? <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 12 }}>불러오는 중…</p> : dimStats.map((d) => (
+              <div key={d.key} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+                  <d.icon size={14} color={d.c} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: T.ink }}>{d.label}</span>
+                  <span style={{ fontSize: 12, color: T.muted }}>{d.count}회</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: d.c, minWidth: 42, textAlign: "right" }}>{d.total}P</span>
+                </div>
+                <div style={{ height: 5, borderRadius: 999, background: "#F1EDE3" }}>
+                  <div style={{ width: `${(d.total / maxTotal) * 100}%`, height: "100%", borderRadius: 999, background: d.c, transition: "width .5s ease" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* 최근 적립 */}
+          <p style={{ margin: "0 0 11px", fontSize: 14, fontWeight: 700, color: T.ink }}>최근 적립</p>
+          {log.length === 0 ? (
+            <Empty icon={Feather} text={"아직 오늘의 첫 걸음 전이에요.\n홈에서 훈련을 시작해 보세요."} />
+          ) : (
+            <div style={{ display: "grid", gap: 7 }}>
+              {log.slice(0, 15).map((e) => (
+                <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: T.card, borderRadius: 11, padding: "11px 14px", border: `1px solid ${T.line}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 8, background: T.goldSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><Sparkles size={14} color={T.gold} /></div>
+                    <div><p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: T.ink }}>{e.label}</p><p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{e.time}</p></div>
+                  </div>
+                  <span style={{ fontSize: 14.5, fontWeight: 700, color: T.sage }}>+{e.pts}P</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
