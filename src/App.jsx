@@ -366,6 +366,33 @@ export default function App() {
   const profileComplete = !!(user && user.name);
   const signOut = () => supabase.auth.signOut();
 
+  // 관리자 여부 + DB 콘텐츠
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [dbContents, setDbContents] = useState([]);
+  const [dbVerses, setDbVerses] = useState([]);
+
+  const loadContents = async () => {
+    const { data } = await supabase.from("contents").select("*").eq("active", true).order("sort_order");
+    if (data) setDbContents(data);
+    const { data: v } = await supabase.from("verses").select("*").eq("active", true).order("sort_order");
+    if (v) setDbVerses(v);
+  };
+  useEffect(() => { loadContents(); }, []);
+  useEffect(() => {
+    if (!session) { setIsAdmin(false); return; }
+    supabase.from("profiles").select("is_admin").eq("id", session.user.id).single()
+      .then(({ data }) => setIsAdmin(!!data?.is_admin));
+  }, [session]);
+
+  // DB에 콘텐츠가 있으면 그걸 쓰고, 없으면 기본값 사용
+  const byCat = (cat, fallback) => {
+    const rows = dbContents.filter((c) => c.category === cat);
+    return rows.length ? rows : fallback;
+  };
+  const verseToday = dbVerses.length
+    ? dbVerses[dayIndex() % dbVerses.length]
+    : VERSES[dayIndex() % VERSES.length];
+
   const [done7, setDone7] = useState(Object.fromEntries(DIMS.map((d) => [d.key, false])));
   const [journal, setJournal] = useState(SEED_JOURNAL);
   const [memDone, setMemDone] = useState(false);
@@ -411,7 +438,7 @@ export default function App() {
   };
 
   const doneCount = DIMS.filter((d) => done7[d.key]).length;
-  const ctx = { tab, setTab, points, log, posts, setPosts, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, rooms, setRooms, threads, setThreads, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit };
+  const ctx = { tab, setTab, points, log, posts, setPosts, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, rooms, setRooms, threads, setThreads, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents };
 
   return (
     <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
@@ -435,7 +462,7 @@ export default function App() {
           {tab === "me" && <Me {...ctx} />}
         </div>
 
-        {sheet && <TrainSheet dimKey={sheet} done={done7[sheet]} onClose={() => setSheet(null)} onComplete={completeDim} />}
+        {sheet && <TrainSheet dimKey={sheet} done={done7[sheet]} onClose={() => setSheet(null)} onComplete={completeDim} byCat={byCat} />}
 
         {toast && (
           <div style={{ position: "absolute", left: "50%", bottom: 100, transform: "translateX(-50%)", background: T.ink, color: "#fff", padding: "10px 16px", borderRadius: 999, display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap", boxShadow: "0 8px 24px rgba(32,42,68,.35)", animation: "pop .25s ease", zIndex: 50 }}>
@@ -454,7 +481,7 @@ export default function App() {
    홈
 ────────────────────────────────────────────── */
 function Home(ctx) {
-  const { done7, doneCount, setSheet, memDone, memStreak, doMemorize, threads, rooms, setTab } = ctx;
+  const { done7, doneCount, setSheet, memDone, memStreak, doMemorize, threads, rooms, setTab, verseToday } = ctx;
   const hour = new Date().getHours();
   const greet = hour < 11 ? "좋은 아침이에요" : hour < 18 ? "평안한 오후예요" : "고요한 저녁이에요";
 
@@ -509,7 +536,7 @@ function Home(ctx) {
 
       <div style={{ padding: "14px 16px 6px" }}>
         {/* 오늘의 말씀 (암송) — 콤팩트 */}
-        <MemorizeCard verse={TODAY_VERSE} done={memDone} streak={memStreak} onDone={doMemorize} />
+        <MemorizeCard verse={verseToday} done={memDone} streak={memStreak} onDone={doMemorize} />
 
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "18px 2px 10px" }}>
           <h2 style={{ fontFamily: serif, fontSize: 19.5, fontWeight: 700, color: T.ink, margin: 0 }}>오늘의 신앙 훈련</h2>
@@ -614,7 +641,7 @@ function MemorizeModal({ verse, onClose, onDone, done }) {
 /* ─────────────────────────────────────────────
    훈련 상세 시트 (일곱 항목 공용)
 ────────────────────────────────────────────── */
-function TrainSheet({ dimKey, done, onClose, onComplete }) {
+function TrainSheet({ dimKey, done, onClose, onComplete, byCat }) {
   const dim = DIM[dimKey];
   const [note, setNote] = useState("");
   const [web, setWeb] = useState(null);
@@ -625,7 +652,7 @@ function TrainSheet({ dimKey, done, onClose, onComplete }) {
     <Sheet onClose={onClose} accent={dim.c} title={<><Ic size={16} color={dim.c} /> {dim.label}</>}>
       <p style={{ margin: "0 0 14px", fontSize: 14, color: T.muted }}>{dim.sub}</p>
 
-      <div style={{ marginBottom: 16 }}>{renderContent(dimKey, { openWeb })}</div>
+      <div style={{ marginBottom: 16 }}>{renderContent(dimKey, { openWeb, byCat })}</div>
 
       <p style={{ margin: "0 0 7px", fontSize: 14, fontWeight: 700, color: T.ink }}>오늘의 후기</p>
       <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={dim.prompt}
@@ -641,9 +668,9 @@ function TrainSheet({ dimKey, done, onClose, onComplete }) {
   );
 }
 
-function renderContent(key, { openWeb }) {
+function renderContent(key, { openWeb, byCat }) {
   if (key === "word") return <BibleFinder openWeb={openWeb} />;
-  if (key === "qt") return <QTLinks openWeb={openWeb} />;
+  if (key === "qt") return <QTLinks openWeb={openWeb} items={byCat("qt", QT_LINKS.map(l => ({ title: l.name, subtitle: l.desc, url: l.url, kind: l.kind })))} />;
   if (key === "prayer")
     return (
       <div style={{ display: "grid", gap: 8 }}>
@@ -722,10 +749,10 @@ function renderContent(key, { openWeb }) {
         <div>
           <p style={{ margin: "0 0 7px", fontSize: 14, fontWeight: 700, color: "#4E7CA1" }}>🔗 후원·기부처</p>
           <div style={{ display: "grid", gap: 6 }}>
-            {MISSION_LINKS.map((l) => (
-              <button key={l.name} onClick={() => openWeb(l.url, l.name)} style={{ display: "flex", alignItems: "center", gap: 9, textAlign: "left", background: T.card, borderRadius: 11, padding: "10px 12px", border: `1px solid ${T.line}` }}>
+            {byCat("mission", MISSION_LINKS.map(m => ({ title: m.name, subtitle: m.desc, url: m.url }))).map((l) => (
+              <button key={l.id || l.title} onClick={() => openWeb(l.url, l.title)} style={{ display: "flex", alignItems: "center", gap: 9, textAlign: "left", background: T.card, borderRadius: 11, padding: "10px 12px", border: `1px solid ${T.line}` }}>
                 <HandHeart size={16} color="#4E7CA1" style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink }}>{l.name}</p><p style={{ margin: 0, fontSize: 12, color: T.muted }}>{l.desc}</p></div>
+                <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink }}>{l.title}</p><p style={{ margin: 0, fontSize: 12, color: T.muted }}>{l.subtitle}</p></div>
                 <ExternalLink size={14} color={T.muted} style={{ flexShrink: 0 }} />
               </button>
             ))}
@@ -804,22 +831,26 @@ function BibleFinder({ openWeb }) {
 }
 
 /* QT — 큐티 영상·묵상 링크 */
-function QTLinks({ openWeb }) {
+function QTLinks({ openWeb, items }) {
+  const COLORS = [T.violet, T.rose, T.teal, T.sage, T.goldDeep];
   return (
     <div style={{ display: "grid", gap: 9 }}>
       <p style={{ margin: "0 0 2px", fontSize: 13.5, color: T.muted }}>영상은 앱 안에서 재생돼요</p>
-      {QT_LINKS.map((l) => (
-        <button key={l.name} onClick={() => openWeb(l.url, l.name, l.kind)} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", background: T.card, borderRadius: 12, padding: 11, border: `1px solid ${T.line}` }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: `${l.c}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Play size={17} color={l.c} fill={l.c} /></div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{l.name}</p>
-            <p style={{ margin: "2px 0 0", fontSize: 13, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.desc}</p>
-          </div>
-          {l.kind === "embed"
-            ? <span style={{ fontSize: 11.5, fontWeight: 700, color: l.c, background: `${l.c}18`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>앱 내 재생</span>
-            : <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, color: T.muted, flexShrink: 0 }}><ExternalLink size={12} /> 새 탭</span>}
-        </button>
-      ))}
+      {items.map((l, i) => {
+        const c = COLORS[i % COLORS.length];
+        return (
+          <button key={l.id || l.title} onClick={() => openWeb(l.url, l.title, l.kind)} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", background: T.card, borderRadius: 12, padding: 11, border: `1px solid ${T.line}` }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: `${c}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Play size={17} color={c} fill={c} /></div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{l.title}</p>
+              <p style={{ margin: "2px 0 0", fontSize: 13, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.subtitle}</p>
+            </div>
+            {l.kind === "embed"
+              ? <span style={{ fontSize: 11.5, fontWeight: 700, color: c, background: `${c}18`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>앱 내 재생</span>
+              : <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, color: T.muted, flexShrink: 0 }}><ExternalLink size={12} /> 새 탭</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1469,14 +1500,172 @@ function FruitChallenge({ onClose, earnedFruits, growingFruit, growStep, selectF
 /* ─────────────────────────────────────────────
    내 정보 · 회원가입
 ────────────────────────────────────────────── */
-function Me({ user, profileComplete, authReady, points, signOut }) {
+function Me({ user, profileComplete, authReady, points, signOut, isAdmin, dbContents, dbVerses, loadContents }) {
+  const [admin, setAdmin] = useState(false);
   if (!authReady) return <div style={{ padding: 60, textAlign: "center", color: T.muted, fontSize: 14 }}>불러오는 중…</div>;
   if (!user) return <SignIn />;
   if (!profileComplete) return <ProfileSetup user={user} />;
-  return <Profile user={user} points={points} onOut={signOut} />;
+  return (
+    <>
+      <Profile user={user} points={points} onOut={signOut} isAdmin={isAdmin} onAdmin={() => setAdmin(true)} />
+      {admin && <AdminPanel onClose={() => setAdmin(false)} dbContents={dbContents} dbVerses={dbVerses} reload={loadContents} />}
+    </>
+  );
 }
 
-function Profile({ user, points, onOut }) {
+function AdminPanel({ onClose, dbContents, dbVerses, reload }) {
+  const CATS = [
+    { key: "qt", label: "QT 영상" },
+    { key: "praise", label: "찬양" },
+    { key: "worship", label: "예배·설교" },
+    { key: "mission", label: "구제·선교 후원처" },
+    { key: "book", label: "추천 도서" },
+    { key: "lecture", label: "강연·수련회" },
+  ];
+  const [tab, setTab] = useState("qt");
+  const [editing, setEditing] = useState(null); // 콘텐츠 객체 or 'new'
+  const [vEdit, setVEdit] = useState(null);     // 구절 편집
+  const [busy, setBusy] = useState(false);
+  const isVerse = tab === "verse";
+
+  const save = async (row) => {
+    setBusy(true);
+    const payload = { category: tab, title: row.title, subtitle: row.subtitle, url: row.url, kind: row.kind || "site", sort_order: Number(row.sort_order) || 0, active: true };
+    if (row.id) await supabase.from("contents").update(payload).eq("id", row.id);
+    else await supabase.from("contents").insert(payload);
+    setEditing(null); await reload(); setBusy(false);
+  };
+  const del = async (id) => {
+    if (!confirm("정말 삭제할까요?")) return;
+    setBusy(true); await supabase.from("contents").delete().eq("id", id); await reload(); setBusy(false);
+  };
+  const saveVerse = async (v) => {
+    setBusy(true);
+    const payload = { ref: v.ref, ref_en: v.ref_en, ko: v.ko, web: v.web, asv: v.asv, sort_order: Number(v.sort_order) || 0, active: true };
+    if (v.id) await supabase.from("verses").update(payload).eq("id", v.id);
+    else await supabase.from("verses").insert(payload);
+    setVEdit(null); await reload(); setBusy(false);
+  };
+  const delVerse = async (id) => {
+    if (!confirm("이 구절을 삭제할까요?")) return;
+    setBusy(true); await supabase.from("verses").delete().eq("id", id); await reload(); setBusy(false);
+  };
+
+  const rows = dbContents.filter((c) => c.category === tab);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 70, background: T.paper, overflowY: "auto", display: "flex", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 400, paddingBottom: 40 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${T.line}`, position: "sticky", top: 0, background: T.paper, zIndex: 2 }}>
+          <button onClick={onClose}><ChevronLeft size={22} color={T.ink} /></button>
+          <span style={{ flex: 1, fontSize: 16.5, fontWeight: 700, color: T.ink }}>콘텐츠 관리</span>
+          {busy && <span style={{ fontSize: 12, color: T.muted }}>저장 중…</span>}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, padding: "12px 16px", overflowX: "auto" }}>
+          {[...CATS, { key: "verse", label: "암송 구절" }].map((c) => (
+            <button key={c.key} onClick={() => { setTab(c.key); setEditing(null); setVEdit(null); }}
+              style={{ whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 700, padding: "7px 12px", borderRadius: 999, flexShrink: 0,
+                background: tab === c.key ? T.ink : T.card, color: tab === c.key ? "#fff" : T.muted, border: `1px solid ${tab === c.key ? T.ink : T.line}` }}>{c.label}</button>
+          ))}
+        </div>
+
+        <div style={{ padding: "0 16px" }}>
+          {isVerse ? (
+            <>
+              <button onClick={() => setVEdit({ ref: "", ref_en: "", ko: "", web: "", asv: "", sort_order: dbVerses.length + 1 })} style={{ width: "100%", padding: "12px 0", borderRadius: 11, background: T.gold, color: "#fff", fontSize: 14, fontWeight: 700, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><Plus size={16} /> 구절 추가</button>
+              {dbVerses.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>아직 등록된 구절이 없어요.<br />추가하면 앱의 오늘의 암송에 나와요.</p>}
+              {dbVerses.map((v) => (
+                <div key={v.id} style={{ background: T.card, borderRadius: 12, border: `1px solid ${T.line}`, padding: 13, marginBottom: 9 }}>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.goldDeep }}>{v.ref}</p>
+                  <p style={{ margin: "4px 0 8px", fontSize: 13.5, color: T.ink, lineHeight: 1.5, fontFamily: serif }}>{v.ko}</p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setVEdit(v)} style={{ fontSize: 12.5, color: T.gold, fontWeight: 700 }}>수정</button>
+                    <button onClick={() => delVerse(v.id)} style={{ fontSize: 12.5, color: T.rose, fontWeight: 700 }}>삭제</button>
+                  </div>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <button onClick={() => setEditing({ title: "", subtitle: "", url: "", kind: "site", sort_order: rows.length + 1 })} style={{ width: "100%", padding: "12px 0", borderRadius: 11, background: T.gold, color: "#fff", fontSize: 14, fontWeight: 700, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><Plus size={16} /> 새 항목 추가</button>
+              {rows.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>아직 등록된 항목이 없어요.</p>}
+              {rows.map((r) => (
+                <div key={r.id} style={{ background: T.card, borderRadius: 12, border: `1px solid ${T.line}`, padding: 13, marginBottom: 9 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <p style={{ margin: 0, flex: 1, fontSize: 14, fontWeight: 700, color: T.ink }}>{r.title}</p>
+                    {r.kind === "embed" && <span style={{ fontSize: 10, fontWeight: 700, color: T.violet, background: `${T.violet}18`, borderRadius: 999, padding: "2px 7px" }}>앱 내 재생</span>}
+                  </div>
+                  <p style={{ margin: "3px 0 6px", fontSize: 12.5, color: T.muted }}>{r.subtitle}</p>
+                  <p style={{ margin: "0 0 8px", fontSize: 11, color: T.muted, wordBreak: "break-all" }}>{r.url}</p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setEditing(r)} style={{ fontSize: 12.5, color: T.gold, fontWeight: 700 }}>수정</button>
+                    <button onClick={() => del(r.id)} style={{ fontSize: 12.5, color: T.rose, fontWeight: 700 }}>삭제</button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        {editing && <ContentForm row={editing} cat={tab} onCancel={() => setEditing(null)} onSave={save} />}
+        {vEdit && <VerseForm row={vEdit} onCancel={() => setVEdit(null)} onSave={saveVerse} />}
+      </div>
+    </div>
+  );
+}
+
+function ContentForm({ row, cat, onCancel, onSave }) {
+  const [f, setF] = useState(row);
+  const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
+  const isMedia = cat === "qt" || cat === "praise" || cat === "worship";
+  return (
+    <Sheet onClose={onCancel} accent={T.gold} title={row.id ? "항목 수정" : "새 항목 추가"}>
+      <Field icon={Feather} label="이름" placeholder="예 · 큐티인 오늘의 큐티" value={f.title} onChange={(v) => set("title", v)} />
+      <Field icon={PenLine} label="설명" placeholder="예 · 재생목록 · 앱 안에서 재생" value={f.subtitle || ""} onChange={(v) => set("subtitle", v)} />
+      <Field icon={ExternalLink} label="링크(URL)" placeholder="https://..." value={f.url || ""} onChange={(v) => set("url", v)} />
+      {isMedia && (
+        <div style={{ marginBottom: 14 }}>
+          <p style={{ margin: "0 0 7px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>열기 방식</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[{ k: "embed", l: "앱 안에서 재생" }, { k: "site", l: "새 탭에서 열기" }].map((o) => (
+              <button key={o.k} onClick={() => set("kind", o.k)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, fontSize: 13, fontWeight: 700, background: f.kind === o.k ? T.ink : T.card, color: f.kind === o.k ? "#fff" : T.muted, border: `1px solid ${f.kind === o.k ? T.ink : T.line}` }}>{o.l}</button>
+            ))}
+          </div>
+          <p style={{ margin: "7px 2px 0", fontSize: 11.5, color: T.muted, lineHeight: 1.5 }}>* 유튜브 재생목록은 <b>youtube.com/embed/videoseries?list=…</b> 형태로 넣고 "앱 안에서 재생"을 고르세요.</p>
+        </div>
+      )}
+      <button onClick={() => onSave(f)} disabled={!f.title} style={{ width: "100%", padding: "13px 0", borderRadius: 11, fontSize: 15, fontWeight: 700, background: f.title ? T.ink : T.line, color: f.title ? "#fff" : T.muted }}>저장</button>
+    </Sheet>
+  );
+}
+
+function VerseForm({ row, onCancel, onSave }) {
+  const [f, setF] = useState(row);
+  const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
+  return (
+    <Sheet onClose={onCancel} accent={T.gold} title={row.id ? "구절 수정" : "구절 추가"}>
+      <Field icon={BookOpen} label="장절 (한글)" placeholder="예 · 요한복음 3:16" value={f.ref} onChange={(v) => set("ref", v)} />
+      <Field icon={BookOpen} label="장절 (영어)" placeholder="예 · John 3:16" value={f.ref_en || ""} onChange={(v) => set("ref_en", v)} />
+      <TextArea label="개역한글" placeholder="한글 본문" value={f.ko} onChange={(v) => set("ko", v)} />
+      <TextArea label="WEB (현대 영어)" placeholder="English (World English Bible)" value={f.web || ""} onChange={(v) => set("web", v)} />
+      <TextArea label="ASV (고전 영어)" placeholder="English (American Standard Version)" value={f.asv || ""} onChange={(v) => set("asv", v)} />
+      <button onClick={() => onSave(f)} disabled={!f.ref || !f.ko} style={{ width: "100%", padding: "13px 0", borderRadius: 11, fontSize: 15, fontWeight: 700, background: (f.ref && f.ko) ? T.ink : T.line, color: (f.ref && f.ko) ? "#fff" : T.muted }}>저장</button>
+    </Sheet>
+  );
+}
+
+function TextArea({ label, placeholder, value, onChange }) {
+  return (
+    <div style={{ marginBottom: 13 }}>
+      <p style={{ margin: "0 0 7px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>{label}</p>
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={3}
+        style={{ width: "100%", border: `1px solid ${T.line}`, outline: "none", borderRadius: 11, padding: "11px 13px", fontSize: 14, color: T.ink, background: T.card, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+    </div>
+  );
+}
+
+function Profile({ user, points, onOut, isAdmin, onAdmin }) {
   const st = stageInfo(points).current;
   const [invite, setInvite] = useState(false);
   const [safety, setSafety] = useState(false);
@@ -1504,6 +1693,16 @@ function Profile({ user, points, onOut }) {
           <InfoRow icon={Church} label="소속 교회" value={user.church} />
           <InfoRow icon={kakao ? MessageCircle : Mail} label="로그인" value={kakao ? "카카오 로그인" : user.email} last />
         </div>
+        {isAdmin && (
+          <button onClick={onAdmin} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: `linear-gradient(150deg, ${T.ink}, #3A335E)`, border: "none", borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
+            <div style={{ width: 40, height: 40, borderRadius: 11, background: "rgba(255,255,255,.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><PenLine size={20} color={T.gold} /></div>
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>콘텐츠 관리 (관리자)</p>
+              <p style={{ margin: "2px 0 0", fontSize: 13.5, color: "rgba(255,255,255,.7)" }}>QT·찬양·후원처·도서·구절 관리</p>
+            </div>
+            <ChevronRight size={18} color={T.gold} />
+          </button>
+        )}
         <button onClick={() => setSafety(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: `${T.rose}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><ShieldCheck size={20} color={T.rose} /></div>
           <div style={{ flex: 1 }}>
@@ -1633,6 +1832,7 @@ function ProfileSetup({ user }) {
     if (!nick.trim() || !agree || saving) return;
     setSaving(true);
     await supabase.auth.updateUser({ data: { nickname: nick.trim(), church: church.trim() || "미입력" } });
+    await supabase.from("profiles").upsert({ id: user.id, nickname: nick.trim(), church: church.trim() || "미입력" });
     setSaving(false);
   };
   const canSave = nick.trim() && agree && !saving;
