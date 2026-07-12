@@ -230,6 +230,7 @@ const BIBLE_VERSIONS = [
 ];
 /* 오늘 날짜 기준으로 구절 고르기 (매일 자동으로 바뀜) */
 const dayIndex = () => Math.floor((Date.now() + 9 * 3600e3) / 86400e3); // 한국 기준 일수
+const todayKey = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10); // YYYY-MM-DD (한국)
 const TODAY_VERSE = VERSES[dayIndex() % VERSES.length];
 
 /* 오늘 서울 날씨 (데모 · 실제로는 기상 API로 매일 갱신) */
@@ -409,17 +410,75 @@ export default function App() {
     : VERSES[dayIndex() % VERSES.length];
 
   const [done7, setDone7] = useState(Object.fromEntries(DIMS.map((d) => [d.key, false])));
-  const [journal, setJournal] = useState(SEED_JOURNAL);
+  const [journal, setJournal] = useState([]);
   const [memDone, setMemDone] = useState(false);
-  const [memStreak, setMemStreak] = useState(3);
+  const [memStreak, setMemStreak] = useState(0);
   const [sheet, setSheet] = useState(null); // 열린 훈련 key
   const [rooms, setRooms] = useState(SEED_ROOMS);
   const [threads, setThreads] = useState(SEED_THREADS);
 
   // 성령의 아홉 열매
-  const [earnedFruits, setEarnedFruits] = useState(["love"]);
-  const [growingFruit, setGrowingFruit] = useState("joy");
-  const [growStep, setGrowStep] = useState(1);
+  const [earnedFruits, setEarnedFruits] = useState([]);
+  const [growingFruit, setGrowingFruit] = useState(null);
+  const [growStep, setGrowStep] = useState(0);
+
+
+  // ── 로그인하면 내 기록 불러오기 ──
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!session) { setLoaded(false); return; }
+    const uid = session.user.id;
+    (async () => {
+      // 프로필 (포인트 · 성실한 날 · 목표 · 열매)
+      const { data: p } = await supabase.from("profiles")
+        .select("points, faith_days, daily_goal, mem_streak, earned_fruits, growing_fruit, grow_step")
+        .eq("id", uid).single();
+      if (p) {
+        setPoints(p.points || 0);
+        setFaithDays(p.faith_days || 0);
+        setDailyGoal(p.daily_goal || DEFAULT_GOAL);
+        setMemStreak(p.mem_streak || 0);
+        setEarnedFruits(p.earned_fruits?.length ? p.earned_fruits : []);
+        setGrowingFruit(p.growing_fruit || null);
+        setGrowStep(p.grow_step || 0);
+      }
+      // 오늘 기록
+      const { data: d } = await supabase.from("daily_logs")
+        .select("*").eq("user_id", uid).eq("day", todayKey()).maybeSingle();
+      if (d) {
+        setTodayPts(d.today_pts || 0);
+        setGoalHitToday(!!d.goal_hit);
+        setMemDone(!!d.mem_done);
+        setDone7(Object.fromEntries(DIMS.map((x) => [x.key, (d.done_dims || []).includes(x.key)])));
+      } else {
+        setTodayPts(0); setGoalHitToday(false); setMemDone(false);
+        setDone7(Object.fromEntries(DIMS.map((x) => [x.key, false])));
+      }
+      // 신앙일기
+      const { data: j } = await supabase.from("journal")
+        .select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(60);
+      if (j) setJournal(j.map((r) => ({ id: r.id, date: r.day, dim: r.dim, note: r.note || "", time: "" })));
+      setLoaded(true);
+    })();
+  }, [session]);
+
+  // ── 바뀌면 저장 ──
+  const uid = session?.user?.id;
+  useEffect(() => {
+    if (!uid || !loaded) return;
+    supabase.from("profiles").update({
+      points, faith_days: faithDays, daily_goal: dailyGoal, mem_streak: memStreak,
+      earned_fruits: earnedFruits, growing_fruit: growingFruit, grow_step: growStep,
+    }).eq("id", uid).then(() => {});
+  }, [uid, loaded, points, faithDays, dailyGoal, memStreak, earnedFruits, growingFruit, growStep]);
+
+  useEffect(() => {
+    if (!uid || !loaded) return;
+    supabase.from("daily_logs").upsert({
+      user_id: uid, day: todayKey(), today_pts: todayPts, goal_hit: goalHitToday,
+      mem_done: memDone, done_dims: DIMS.filter((x) => done7[x.key]).map((x) => x.key),
+    }, { onConflict: "user_id,day" }).then(() => {});
+  }, [uid, loaded, todayPts, goalHitToday, memDone, done7]);
 
   const selectFruit = (key) => { if (growingFruit || earnedFruits.includes(key)) return; setGrowingFruit(key); setGrowStep(0); };
   const growAction = () => setGrowStep((s) => Math.min(2, s + 1));
@@ -449,11 +508,12 @@ export default function App() {
     });
   };
 
-  const completeDim = (key, note) => {
+  const completeDim = async (key, note) => {
     const first = !done7[key];
     setDone7((d) => ({ ...d, [key]: true }));
-    setJournal((j) => [{ id: Date.now(), date: todayLabel(), dim: key, note: (note || "").trim(), time: "방금" }, ...j]);
+    setJournal((j) => [{ id: Date.now(), date: todayKey(), dim: key, note: (note || "").trim(), time: "방금" }, ...j]);
     if (first) award(DIM[key].pts, `${DIM[key].label} 훈련`);
+    if (uid) await supabase.from("journal").insert({ user_id: uid, day: todayKey(), dim: key, note: (note || "").trim() });
   };
 
   const doMemorize = () => {
