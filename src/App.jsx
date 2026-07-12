@@ -749,7 +749,9 @@ function TrainSheet({ dimKey, done, onClose, onComplete, byCat, verseToday }) {
         {done ? <><Check size={16} /> 오늘 완료됨</> : <><PenLine size={15} /> 훈련 완료 · 일기 저장 · +{dim.pts}P</>}
       </button>
 
-      {web && <WebView url={web.url} title={web.title} kind={web.kind} verse={verseToday} onClose={() => setWeb(null)} />}
+      {web && <WebView url={web.url} title={web.title} kind={web.kind} onClose={() => setWeb(null)}
+        note={note} setNote={setNote} done={done} dim={dim}
+        onComplete={() => { onComplete(dimKey, note); setWeb(null); onClose(); }} />}
     </Sheet>
   );
 }
@@ -1023,15 +1025,16 @@ function QTLinks({ openWeb, items }) {
 }
 
 /* 프레임 안 웹뷰 */
-function WebView({ url, title, kind, onClose, verse }) {
+function WebView({ url, title, kind, onClose, note, setNote, done, dim, onComplete }) {
   const embed = kind === "embed";
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
+  const dateStr = new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
   const QUESTIONS = [
     "오늘 본문에서 하나님은 어떤 분으로 보이나요?",
     "마음에 남은 한 구절은 무엇인가요?",
     "오늘 내 삶에 적용할 한 가지는?",
   ];
+  const canWrite = !!setNote;
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", justifyContent: "center", background: "rgba(0,0,0,.45)" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, height: "100%", background: T.paper, display: "flex", flexDirection: "column" }}>
@@ -1047,32 +1050,38 @@ function WebView({ url, title, kind, onClose, verse }) {
 
         {embed ? (
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {/* 영상 — 16:9 비율 고정 */}
+            {/* 영상 — 16:9 */}
             <div style={{ width: "100%", aspectRatio: "16 / 9", background: "#000", flexShrink: 0 }}>
               <iframe src={url} title={title} style={{ width: "100%", height: "100%", border: 0, display: "block" }}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
             </div>
             <p style={{ margin: "8px 16px 0", fontSize: 11.5, color: T.muted, lineHeight: 1.5 }}>영상 왼쪽 위 <b>목록 아이콘</b>을 누르면 날짜별 큐티 목록을 볼 수 있어요.</p>
 
-            {/* 아래 여백을 묵상으로 채우기 */}
-            <div style={{ padding: "14px 16px 24px" }}>
-              {verse && (
-                <div style={{ background: `linear-gradient(150deg, #FFFDF7, ${T.goldSoft})`, borderRadius: 13, padding: "13px 15px", border: `1px solid ${T.goldSoft}`, marginBottom: 13 }}>
-                  <p style={{ margin: "0 0 5px", fontSize: 11.5, fontWeight: 700, color: T.goldDeep }}>오늘의 말씀</p>
-                  <p style={{ margin: 0, fontFamily: serif, fontSize: 15.5, lineHeight: 1.7, color: T.ink }}>"{verse.ko}"</p>
-                  <p style={{ margin: "6px 0 0", fontSize: 12, color: T.goldDeep, fontWeight: 700 }}>{verse.ref}</p>
-                </div>
-              )}
-              <div style={{ background: T.card, borderRadius: 13, border: `1px solid ${T.line}`, padding: "14px 15px" }}>
+            <div style={{ padding: "14px 16px 28px" }}>
+              {/* 묵상 질문 */}
+              <div style={{ background: T.card, borderRadius: 13, border: `1px solid ${T.line}`, padding: "14px 15px", marginBottom: 14 }}>
                 <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: T.ink, display: "flex", alignItems: "center", gap: 6 }}><Feather size={14} color={T.violet} /> 묵상 질문</p>
                 {QUESTIONS.map((q) => (
-                  <div key={q} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 9 }}>
+                  <div key={q} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8 }}>
                     <span style={{ width: 5, height: 5, borderRadius: 999, background: T.violet, flexShrink: 0, marginTop: 7 }} />
-                    <span style={{ fontSize: 14, color: T.inkSoft, lineHeight: 1.55 }}>{q}</span>
+                    <span style={{ fontSize: 13.5, color: T.inkSoft, lineHeight: 1.55 }}>{q}</span>
                   </div>
                 ))}
-                <p style={{ margin: "10px 0 0", paddingTop: 10, borderTop: `1px solid ${T.line}`, fontSize: 12.5, color: T.muted, lineHeight: 1.5 }}>영상을 본 뒤 <b style={{ color: T.ink }}>뒤로 가서 후기</b>를 남기면 신앙일기에 저장돼요 ✦</p>
               </div>
+
+              {/* 후기 바로 쓰기 */}
+              {canWrite && (
+                <>
+                  <p style={{ margin: "0 0 7px", fontSize: 14, fontWeight: 700, color: T.ink }}>오늘의 후기</p>
+                  <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder={dim?.prompt || "오늘 받은 은혜를 적어보세요"}
+                    style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px 13px", fontSize: 14.5, lineHeight: 1.6, color: T.ink, outline: "none", resize: "none", background: "#fff", fontFamily: "inherit" }} />
+                  <button onClick={onComplete} disabled={done}
+                    style={{ width: "100%", padding: "13px 0", marginTop: 11, borderRadius: 12, fontSize: 16, fontWeight: 700, background: done ? T.sageSoft : (dim?.c || T.ink), color: done ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                    {done ? <><Check size={16} /> 오늘 완료됨</> : <><PenLine size={15} /> 훈련 완료 · 일기 저장 · +{dim?.pts}P</>}
+                  </button>
+                  <p style={{ margin: "9px 2px 0", fontSize: 11.5, color: T.muted, textAlign: "center" }}>영상을 보고 바로 후기를 남길 수 있어요 ✦</p>
+                </>
+              )}
             </div>
           </div>
         ) : (
