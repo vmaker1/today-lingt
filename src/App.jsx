@@ -887,11 +887,13 @@ function BibleFinder({ openWeb }) {
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [found, setFound] = useState(null);
+  const [ver, setVer] = useState("ko");   // ko | asv | kjv
   const books = testament === "ot" ? BIBLE_OT : BIBLE_NT;
+  const VERS = [{ k: "ko", l: "개역한글" }, { k: "asv", l: "ASV" }, { k: "kjv", l: "KJV" }];
 
   const openChapter = async (name, ch) => {
     setChapter(ch); setLoading(true); setVerses([]);
-    const { data } = await supabase.from("bible").select("verse, ko")
+    const { data } = await supabase.from("bible").select("verse, ko, asv, kjv")
       .eq("book", name).eq("chapter", ch).order("verse");
     setVerses(data || []); setLoading(false);
   };
@@ -909,15 +911,20 @@ function BibleFinder({ openWeb }) {
     return (
       <div>
         <button onClick={() => { setChapter(null); setVerses([]); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, color: T.muted, fontWeight: 600, marginBottom: 10 }}><ChevronLeft size={15} /> 장 선택</button>
-        <p style={{ margin: "0 0 12px", fontFamily: serif, fontSize: 19, fontWeight: 700, color: T.ink }}>{book[0]} {chapter}장</p>
+        <p style={{ margin: "0 0 9px", fontFamily: serif, fontSize: 19, fontWeight: 700, color: T.ink }}>{book[0]} {chapter}장</p>
+        <div style={{ display: "flex", gap: 5, marginBottom: 11 }}>
+          {VERS.map((v) => (
+            <button key={v.k} onClick={() => setVer(v.k)} style={{ fontSize: 12, fontWeight: 700, padding: "5px 11px", borderRadius: 999, background: ver === v.k ? T.ink : T.card, color: ver === v.k ? "#fff" : T.muted, border: `1px solid ${ver === v.k ? T.ink : T.line}` }}>{v.l}</button>
+          ))}
+        </div>
         {loading ? <p style={{ fontSize: 14, color: T.muted, textAlign: "center", padding: 24 }}>불러오는 중…</p> : verses.length === 0 ? (
           <p style={{ fontSize: 13.5, color: T.muted, textAlign: "center", padding: 24, lineHeight: 1.6 }}>본문을 불러오지 못했어요.<br />성경 데이터가 등록되었는지 확인해 주세요.</p>
         ) : (
           <div style={{ maxHeight: 320, overflowY: "auto", background: T.card, borderRadius: 12, border: `1px solid ${T.line}`, padding: "14px 15px" }}>
             {verses.map((v) => (
-              <p key={v.verse} style={{ margin: "0 0 9px", fontSize: 15, lineHeight: 1.75, color: T.inkSoft, fontFamily: serif }}>
+              <p key={v.verse} style={{ margin: "0 0 9px", fontSize: ver === "ko" ? 15 : 14, lineHeight: 1.75, color: T.inkSoft, fontFamily: serif }}>
                 <span style={{ fontSize: 11.5, fontWeight: 700, color: T.gold, marginRight: 5, verticalAlign: "super" }}>{v.verse}</span>
-                {v.ko}
+                {v[ver] || <span style={{ color: T.muted, fontSize: 13 }}>(본문 없음)</span>}
               </p>
             ))}
           </div>
@@ -926,7 +933,7 @@ function BibleFinder({ openWeb }) {
           {chapter > 1 && <button onClick={() => openChapter(book[0], chapter - 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 13.5, fontWeight: 700, color: T.inkSoft }}>← {chapter - 1}장</button>}
           {chapter < book[1] && <button onClick={() => openChapter(book[0], chapter + 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 13.5, fontWeight: 700, color: T.inkSoft }}>{chapter + 1}장 →</button>}
         </div>
-        <p style={{ margin: "9px 2px 0", fontSize: 11, color: T.muted, textAlign: "center" }}>개역한글 (1961) · 공개 도메인</p>
+        <p style={{ margin: "9px 2px 0", fontSize: 11, color: T.muted, textAlign: "center" }}>개역한글(1961) · ASV(1901) · KJV(1611) — 모두 공개 도메인</p>
       </div>
     );
   }
