@@ -881,26 +881,100 @@ function renderContent(key, { openWeb, byCat }) {
 /* 말씀 — 성경 찾기 */
 function BibleFinder({ openWeb }) {
   const [testament, setTestament] = useState("nt");
-  const [book, setBook] = useState(null);
+  const [book, setBook] = useState(null);   // [이름, 장수]
+  const [chapter, setChapter] = useState(null);
+  const [verses, setVerses] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState(null);
   const books = testament === "ot" ? BIBLE_OT : BIBLE_NT;
 
+  const openChapter = async (name, ch) => {
+    setChapter(ch); setLoading(true); setVerses([]);
+    const { data } = await supabase.from("bible").select("verse, ko")
+      .eq("book", name).eq("chapter", ch).order("verse");
+    setVerses(data || []); setLoading(false);
+  };
+
+  const search = async () => {
+    if (!q.trim()) return;
+    setLoading(true); setFound(null);
+    const { data } = await supabase.from("bible").select("book, chapter, verse, ko")
+      .ilike("ko", `%${q.trim()}%`).limit(40);
+    setFound(data || []); setLoading(false);
+  };
+
+  // 본문 읽기 화면
+  if (book && chapter) {
+    return (
+      <div>
+        <button onClick={() => { setChapter(null); setVerses([]); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, color: T.muted, fontWeight: 600, marginBottom: 10 }}><ChevronLeft size={15} /> 장 선택</button>
+        <p style={{ margin: "0 0 12px", fontFamily: serif, fontSize: 19, fontWeight: 700, color: T.ink }}>{book[0]} {chapter}장</p>
+        {loading ? <p style={{ fontSize: 14, color: T.muted, textAlign: "center", padding: 24 }}>불러오는 중…</p> : verses.length === 0 ? (
+          <p style={{ fontSize: 13.5, color: T.muted, textAlign: "center", padding: 24, lineHeight: 1.6 }}>본문을 불러오지 못했어요.<br />성경 데이터가 등록되었는지 확인해 주세요.</p>
+        ) : (
+          <div style={{ maxHeight: 320, overflowY: "auto", background: T.card, borderRadius: 12, border: `1px solid ${T.line}`, padding: "14px 15px" }}>
+            {verses.map((v) => (
+              <p key={v.verse} style={{ margin: "0 0 9px", fontSize: 15, lineHeight: 1.75, color: T.inkSoft, fontFamily: serif }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: T.gold, marginRight: 5, verticalAlign: "super" }}>{v.verse}</span>
+                {v.ko}
+              </p>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 7, marginTop: 10 }}>
+          {chapter > 1 && <button onClick={() => openChapter(book[0], chapter - 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 13.5, fontWeight: 700, color: T.inkSoft }}>← {chapter - 1}장</button>}
+          {chapter < book[1] && <button onClick={() => openChapter(book[0], chapter + 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 13.5, fontWeight: 700, color: T.inkSoft }}>{chapter + 1}장 →</button>}
+        </div>
+        <p style={{ margin: "9px 2px 0", fontSize: 11, color: T.muted, textAlign: "center" }}>개역한글 (1961) · 공개 도메인</p>
+      </div>
+    );
+  }
+
+  // 장 선택
   if (book) {
-    const [name, ch] = book;
     return (
       <div>
         <button onClick={() => setBook(null)} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, color: T.muted, fontWeight: 600, marginBottom: 10 }}><ChevronLeft size={15} /> 성경 목록</button>
-        <p style={{ margin: "0 0 10px", fontSize: 15.5, fontWeight: 700, color: T.ink }}>{name} <span style={{ fontSize: 13.5, color: T.muted, fontWeight: 400 }}>· 전체 {ch}장 · 읽을 장을 선택하세요</span></p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6, maxHeight: 200, overflowY: "auto" }}>
-          {Array.from({ length: ch }).map((_, i) => (
-            <button key={i} onClick={() => openWeb(bibleUrl(name, i + 1), `${name} ${i + 1}장`)} style={{ padding: "9px 0", borderRadius: 8, background: T.card, border: `1px solid ${T.line}`, fontSize: 14, fontWeight: 700, color: T.inkSoft }}>{i + 1}</button>
+        <p style={{ margin: "0 0 10px", fontSize: 15.5, fontWeight: 700, color: T.ink }}>{book[0]} <span style={{ fontSize: 13.5, color: T.muted, fontWeight: 400 }}>· 전체 {book[1]}장</span></p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6, maxHeight: 240, overflowY: "auto" }}>
+          {Array.from({ length: book[1] }).map((_, i) => (
+            <button key={i} onClick={() => openChapter(book[0], i + 1)} style={{ padding: "9px 0", borderRadius: 8, background: T.card, border: `1px solid ${T.line}`, fontSize: 14, fontWeight: 700, color: T.inkSoft }}>{i + 1}</button>
           ))}
         </div>
       </div>
     );
   }
 
+  // 검색 결과
+  if (found) {
+    return (
+      <div>
+        <button onClick={() => { setFound(null); setQ(""); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, color: T.muted, fontWeight: 600, marginBottom: 10 }}><ChevronLeft size={15} /> 성경 목록</button>
+        <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: T.ink }}>"{q}" 검색 결과 {found.length}개</p>
+        {found.length === 0 ? <p style={{ fontSize: 13.5, color: T.muted, textAlign: "center", padding: 20 }}>결과가 없어요.</p> : (
+          <div style={{ maxHeight: 300, overflowY: "auto", display: "grid", gap: 7 }}>
+            {found.map((v, i) => (
+              <div key={i} style={{ background: T.card, borderRadius: 10, border: `1px solid ${T.line}`, padding: "10px 12px" }}>
+                <p style={{ margin: "0 0 3px", fontSize: 11.5, fontWeight: 700, color: T.gold }}>{v.book} {v.chapter}:{v.verse}</p>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: T.inkSoft, fontFamily: serif }}>{v.ko}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 성경 목록 + 검색
   return (
     <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 12px", marginBottom: 11 }}>
+        <Search size={16} color={T.muted} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} placeholder="성경 구절 검색 (예 · 사랑)"
+          style={{ flex: 1, border: "none", outline: "none", padding: "11px 0", fontSize: 14, color: T.ink, background: "transparent" }} />
+        {q && <button onClick={search} style={{ fontSize: 13, fontWeight: 700, color: T.gold }}>검색</button>}
+      </div>
       <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
         {[["nt", "신약"], ["ot", "구약"]].map(([k, l]) => (
           <button key={k} onClick={() => setTestament(k)} style={{ flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 14, fontWeight: 700, background: testament === k ? T.ink : T.card, color: testament === k ? "#fff" : T.muted, border: `1px solid ${testament === k ? T.ink : T.line}` }}>{l}</button>
@@ -911,7 +985,7 @@ function BibleFinder({ openWeb }) {
           <button key={b[0]} onClick={() => setBook(b)} style={{ padding: "10px 4px", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 14, fontWeight: 700, color: T.ink }}>{b[0]}</button>
         ))}
       </div>
-      <p style={{ margin: "10px 2px 0", fontSize: 12, color: T.muted }}>장을 고르면 성경 본문 페이지가 프레임 안에서 열려요.</p>
+      <p style={{ margin: "10px 2px 0", fontSize: 12, color: T.muted }}>장을 고르면 앱 안에서 바로 읽을 수 있어요 · 개역한글</p>
     </div>
   );
 }
