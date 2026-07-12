@@ -1329,6 +1329,7 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
   const [fruitOpen, setFruitOpen] = useState(false);
   const todayPct = Math.min(100, (todayPts / dailyGoal) * 100);
   const [goalOpen, setGoalOpen] = useState(false);
+  const [allStages, setAllStages] = useState(false);
   const myGoal = GOAL_OPTIONS.find((g) => g.pts === dailyGoal) || GOAL_OPTIONS[1];
 
   return (
@@ -1400,7 +1401,12 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
         <div style={{ background: T.card, borderRadius: 16, padding: "16px 16px 6px", border: `1px solid ${T.line}`, marginBottom: 16 }}>
           <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 700, color: T.ink }}>믿음의 성장 여정</p>
           <p style={{ margin: "0 0 14px", fontSize: 13, color: T.muted }}>{growingFruit ? `지금 키우는 열매 · ${FRUIT[growingFruit].emoji} ${FRUIT[growingFruit].name}` : "밭을 고르고 씨를 뿌려, 자라 열매 맺기까지"}</p>
-          {STAGES.map((s, si) => {
+          {(() => {
+            const curStage = stageInfo(faithDays).current.stage;
+            const curIdx = STAGES.findIndex((x) => x.stage === curStage);
+            const shown = allStages ? STAGES.map((x, i) => i) : [curIdx - 1, curIdx, curIdx + 1].filter((i) => i >= 0 && i < STAGES.length);
+            return STAGES.map((s, si) => {
+            if (!shown.includes(si)) return null;
             const allDone = s.steps.every((st) => faithDays >= st.days);
             const isCurrent = s.stage === stageInfo(faithDays).current.stage;
             const started = faithDays >= (si === 0 ? 0 : STAGES[si - 1].steps[STAGES[si - 1].steps.length - 1].days);
@@ -1432,7 +1438,12 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
                 </div>
               </div>
             );
-          })}
+            });
+          })()}
+          <button onClick={() => setAllStages((v) => !v)} style={{ width: "100%", padding: "10px 0", marginTop: 2, marginBottom: 8, borderRadius: 10, background: "transparent", color: T.gold, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+            {allStages ? "접기" : `전체 여정 보기 (${STAGES.length}단계)`}
+            <ChevronRight size={15} style={{ transform: allStages ? "rotate(-90deg)" : "rotate(90deg)", transition: "transform .2s" }} />
+          </button>
         </div>
 
         <p style={{ margin: "0 0 11px", fontSize: 14, fontWeight: 700, color: T.ink }}>적립 내역</p>
