@@ -991,45 +991,134 @@ function InfoLine({ icon: Icon, text, c = T.inkSoft }) {
    신앙일기
 ────────────────────────────────────────────── */
 function Journal({ journal, done7, doneCount }) {
+  const [mode, setMode] = useState("cal");     // cal(달력) | list(목록)
+  const [pickDay, setPickDay] = useState(null); // 선택한 날짜
+  const [filter, setFilter] = useState(null);   // 훈련 필터
+  const [q, setQ] = useState("");               // 검색어
+  const [month, setMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+
+  // 날짜별 그룹
+  const byDay = useMemo(() => {
+    const map = {};
+    journal.forEach((e) => { (map[e.date] = map[e.date] || []).push(e); });
+    return map;
+  }, [journal]);
+
+  // 필터 적용된 목록
+  const filtered = useMemo(() => {
+    let list = journal;
+    if (filter) list = list.filter((e) => e.dim === filter);
+    if (pickDay) list = list.filter((e) => e.date === pickDay);
+    if (q.trim()) {
+      const k = q.trim().toLowerCase();
+      list = list.filter((e) => (e.note || "").toLowerCase().includes(k) || (DIM[e.dim]?.label || "").includes(k));
+    }
+    return [...list].sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [journal, filter, pickDay, q]);
+
   const groups = useMemo(() => {
     const map = new Map();
-    journal.forEach((e) => { if (!map.has(e.date)) map.set(e.date, []); map.get(e.date).push(e); });
+    filtered.forEach((e) => { if (!map.has(e.date)) map.set(e.date, []); map.get(e.date).push(e); });
     return [...map.entries()];
-  }, [journal]);
-  const today = todayLabel();
+  }, [filtered]);
+
+  // 달력 계산
+  const daysInMonth = new Date(month.y, month.m + 1, 0).getDate();
+  const startDow = new Date(month.y, month.m, 1).getDay();
+  const cells = [...Array(startDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const ymd = (d) => `${month.y}-${String(month.m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const shift = (n) => { const d = new Date(month.y, month.m + n, 1); setMonth({ y: d.getFullYear(), m: d.getMonth() }); };
+  const searching = !!q.trim();
+  const active = filter || pickDay || searching;
 
   return (
     <div>
       <Header title="신앙일기" subtitle="매일의 훈련이 모여 나의 여정이 됩니다" />
       <div style={{ padding: "0 16px" }}>
-        {/* 오늘 요약 */}
-        <div style={{ background: `linear-gradient(155deg, ${T.ink}, #3A335E)`, borderRadius: 16, padding: "16px 18px", color: "#fff", marginBottom: 18, position: "relative", overflow: "hidden" }}>
+        {/* 오늘 요약 · 아이콘 누르면 그 훈련만 보기 */}
+        <div style={{ background: `linear-gradient(155deg, ${T.ink}, #3A335E)`, borderRadius: 16, padding: "16px 18px", color: "#fff", marginBottom: 14, position: "relative", overflow: "hidden" }}>
           <StarField faint />
           <div style={{ position: "relative", zIndex: 2 }}>
-            <p style={{ margin: 0, fontSize: 13.5, opacity: .75 }}>오늘의 신앙 훈련</p>
+            <p style={{ margin: 0, fontSize: 13.5, opacity: .75 }}>오늘의 신앙 훈련 <span style={{ opacity: .6 }}>· 아이콘을 누르면 그 훈련만 볼 수 있어요</span></p>
             <p style={{ margin: "3px 0 12px", fontFamily: serif, fontSize: 24.5, fontWeight: 700 }}>{doneCount} <span style={{ fontSize: 15.5, opacity: .7 }}>/ {DIMS.length} 완료</span></p>
             <div style={{ display: "flex", gap: 6 }}>
               {DIMS.map((d) => {
-                const on = done7[d.key]; const Ic = d.icon;
-                return <div key={d.key} title={d.label} style={{ width: 30, height: 30, borderRadius: 9, background: on ? d.c : "rgba(255,255,255,.1)", display: "flex", alignItems: "center", justifyContent: "center" }}><Ic size={15} color={on ? "#fff" : "rgba(255,255,255,.4)"} /></div>;
+                const on = done7[d.key]; const Ic = d.icon; const sel = filter === d.key;
+                return (
+                  <button key={d.key} title={d.label} onClick={() => { setFilter(sel ? null : d.key); setPickDay(null); }}
+                    style={{ width: 30, height: 30, borderRadius: 9, background: sel ? "#fff" : on ? d.c : "rgba(255,255,255,.1)", display: "flex", alignItems: "center", justifyContent: "center", border: sel ? `2px solid ${T.gold}` : "none", flexShrink: 0 }}>
+                    <Ic size={15} color={sel ? d.c : on ? "#fff" : "rgba(255,255,255,.4)"} />
+                  </button>
+                );
               })}
             </div>
           </div>
         </div>
 
+        {/* 검색 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 12px", marginBottom: 12 }}>
+          <Search size={16} color={T.muted} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="일기 내용 검색"
+            style={{ flex: 1, border: "none", outline: "none", padding: "11px 0", fontSize: 14, color: T.ink, background: "transparent" }} />
+          {q && <button onClick={() => setQ("")}><X size={15} color={T.muted} /></button>}
+        </div>
+
+        {/* 필터 상태 표시 */}
+        {active && (
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12, flexWrap: "wrap" }}>
+            {filter && <span style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: DIM[filter].c, borderRadius: 999, padding: "4px 10px" }}>{DIM[filter].label}</span>}
+            {pickDay && <span style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: T.gold, borderRadius: 999, padding: "4px 10px" }}>{pickDay}</span>}
+            {searching && <span style={{ fontSize: 12, fontWeight: 700, color: T.ink, background: T.goldSoft, borderRadius: 999, padding: "4px 10px" }}>"{q}"</span>}
+            <span style={{ fontSize: 12, color: T.muted }}>{filtered.length}개</span>
+            <button onClick={() => { setFilter(null); setPickDay(null); setQ(""); }} style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: T.gold }}>전체 보기</button>
+          </div>
+        )}
+
+        {/* 달력 (필터·검색 중이 아닐 때만) */}
+        {!active && (
+          <div style={{ background: T.card, borderRadius: 16, border: `1px solid ${T.line}`, padding: 16, marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <button onClick={() => shift(-1)} style={{ padding: 4 }}><ChevronLeft size={18} color={T.muted} /></button>
+              <span style={{ fontSize: 14.5, fontWeight: 700, color: T.ink }}>{month.y}년 {month.m + 1}월</span>
+              <button onClick={() => shift(1)} style={{ padding: 4 }}><ChevronRight size={18} color={T.muted} /></button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 6 }}>
+              {["일", "월", "화", "수", "목", "금", "토"].map((d) => <span key={d} style={{ fontSize: 11, color: T.muted, textAlign: "center", fontWeight: 600 }}>{d}</span>)}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+              {cells.map((d, i) => {
+                if (!d) return <div key={`e${i}`} />;
+                const key = ymd(d);
+                const entries = byDay[key] || [];
+                const n = entries.length;
+                const isToday = key === todayKey();
+                return (
+                  <button key={d} onClick={() => n && setPickDay(key)} disabled={!n}
+                    style={{ aspectRatio: "1", borderRadius: 8, background: n ? `rgba(217,164,65,${0.18 + Math.min(1, n / 8) * 0.55})` : "#F4F0E6", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", border: isToday ? `2px solid ${T.ink}` : "none" }}>
+                    <span style={{ fontSize: 11.5, fontWeight: n ? 700 : 400, color: n ? T.ink : T.muted }}>{d}</span>
+                    {n > 0 && <span style={{ fontSize: 8.5, color: T.inkSoft }}>{n}개</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <p style={{ margin: "12px 0 0", fontSize: 11.5, color: T.muted, textAlign: "center" }}>기록이 있는 날을 누르면 그날의 일기를 볼 수 있어요</p>
+          </div>
+        )}
+
+        {/* 일기 목록 */}
         {groups.length === 0 ? (
-          <Empty icon={NotebookPen} text={"아직 기록이 없어요.\n홈에서 훈련 후기를 남겨보세요."} />
+          <Empty icon={NotebookPen} text={active ? "조건에 맞는 기록이 없어요." : "아직 기록이 없어요.\n홈에서 훈련 후기를 남겨보세요."} />
         ) : (
           groups.map(([date, entries]) => (
             <div key={date} style={{ marginBottom: 22 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11 }}>
                 <span style={{ fontFamily: serif, fontSize: 16.5, fontWeight: 700, color: T.ink }}>{date}</span>
-                {date === today && <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff", background: T.gold, borderRadius: 999, padding: "2px 8px" }}>오늘</span>}
+                {date === todayKey() && <span style={{ fontSize: 11.5, fontWeight: 700, color: "#fff", background: T.gold, borderRadius: 999, padding: "2px 8px" }}>오늘</span>}
                 <div style={{ flex: 1, height: 1, background: T.line }} />
               </div>
               <div style={{ display: "grid", gap: 9 }}>
                 {entries.map((e) => {
-                  const d = DIM[e.dim]; const Ic = d.icon;
+                  const d = DIM[e.dim]; if (!d) return null; const Ic = d.icon;
                   return (
                     <div key={e.id} style={{ background: T.card, borderRadius: 13, padding: "12px 14px", border: `1px solid ${T.line}`, borderLeft: `3px solid ${d.c}` }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: e.note ? 7 : 0 }}>
@@ -1050,9 +1139,6 @@ function Journal({ journal, done7, doneCount }) {
   );
 }
 
-/* ─────────────────────────────────────────────
-   함께 — 나눔 · 방 · 쪽지
-────────────────────────────────────────────── */
 function Community(ctx) {
   const [sub, setSub] = useState("feed");
   const [invite, setInvite] = useState(false);
