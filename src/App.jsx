@@ -367,9 +367,15 @@ export default function App() {
   // Supabase 로그인 세션
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
+  const [recovery, setRecovery] = useState(false); // 비밀번호 재설정 링크로 들어온 상태
   useEffect(() => {
+    // 재설정 링크(#type=recovery)로 들어왔는지 확인
+    if (typeof window !== "undefined" && window.location.hash.includes("type=recovery")) setRecovery(true);
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((ev, s) => {
+      setSession(s);
+      if (ev === "PASSWORD_RECOVERY") setRecovery(true);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
   const user = session ? {
@@ -525,6 +531,14 @@ export default function App() {
 
   const doneCount = DIMS.filter((d) => done7[d.key]).length;
   const ctx = { tab, setTab, points, log, posts, setPosts, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, rooms, setRooms, threads, setThreads, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal };
+
+  if (recovery) return (
+    <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
+      <div style={{ width: "100%", maxWidth: 400, background: T.paper, minHeight: "100vh" }}>
+        <NewPassword onDone={() => { setRecovery(false); if (typeof window !== "undefined") window.history.replaceState(null, "", window.location.pathname); }} />
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
@@ -2147,6 +2161,7 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
   const st = stageInfo(faithDays).current;
   const [invite, setInvite] = useState(false);
   const [safety, setSafety] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
   const kakao = user.method === "kakao";
   return (
     <div>
@@ -2181,6 +2196,14 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
             <ChevronRight size={18} color={T.gold} />
           </button>
         )}
+        <button onClick={() => setPwOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: T.goldSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Lock size={20} color={T.goldDeep} /></div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>비밀번호 설정</p>
+            <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted }}>이메일 + 비밀번호로 로그인하기</p>
+          </div>
+          <ChevronRight size={18} color={T.muted} />
+        </button>
         <button onClick={() => setSafety(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: `${T.rose}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><ShieldCheck size={20} color={T.rose} /></div>
           <div style={{ flex: 1 }}>
@@ -2193,6 +2216,12 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
       </div>
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
       {safety && <SafetySheet onClose={() => setSafety(false)} />}
+      {pwOpen && (
+        <Sheet onClose={() => setPwOpen(false)} accent={T.gold} title={<><Lock size={16} color={T.gold} /> 비밀번호 설정</>}>
+          <p style={{ margin: "0 0 14px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>비밀번호를 정하면 다음부터 <b style={{ color: T.ink }}>이메일 + 비밀번호</b>로 바로 로그인할 수 있어요. 메일 확인이 필요 없어요.</p>
+          <NewPassword embedded onDone={() => setPwOpen(false)} />
+        </Sheet>
+      )}
     </div>
   );
 }
@@ -2228,6 +2257,54 @@ function InfoRow({ icon: Icon, label, value, last }) {
     <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "14px 16px", borderBottom: last ? "none" : `1px solid ${T.line}` }}>
       <Icon size={18} color={T.gold} />
       <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: 12, color: T.muted }}>{label}</p><p style={{ margin: "1px 0 0", fontSize: 15.5, color: T.ink, fontWeight: 500 }}>{value}</p></div>
+    </div>
+  );
+}
+
+function NewPassword({ onDone, embedded }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState(false);
+
+  const save = async () => {
+    setErr("");
+    if (pw.length < 6) return setErr("비밀번호는 6자 이상으로 정해 주세요.");
+    if (pw !== pw2) return setErr("비밀번호가 서로 달라요.");
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: pw });
+    setLoading(false);
+    if (error) setErr(error.message);
+    else { setOk(true); setPw(""); setPw2(""); setTimeout(() => { setOk(false); onDone && onDone(); }, 1400); }
+  };
+
+  return (
+    <div>
+      {!embedded && <Header title="비밀번호 설정" subtitle="앞으로 이 비밀번호로 로그인해요" />}
+      <div style={{ padding: embedded ? 0 : "0 16px" }}>
+        {!embedded && (
+          <div style={{ background: T.goldSoft, borderRadius: 12, padding: "13px 15px", marginBottom: 16, display: "flex", gap: 9 }}>
+            <Lock size={17} color={T.goldDeep} style={{ flexShrink: 0, marginTop: 1 }} />
+            <p style={{ margin: 0, fontSize: 13.5, color: T.ink, lineHeight: 1.6 }}>새 비밀번호를 정해 주세요. 다음부터는 <b>이메일 + 비밀번호</b>로 바로 로그인할 수 있어요.</p>
+          </div>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 9, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 13px", marginBottom: 9 }}>
+          <Lock size={17} color={T.gold} />
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="새 비밀번호 (6자 이상)" autoComplete="new-password"
+            style={{ flex: 1, border: "none", outline: "none", padding: "13px 0", fontSize: 15.5, color: T.ink, background: "transparent" }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 13px", marginBottom: 9 }}>
+          <Lock size={17} color={T.muted} />
+          <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="새 비밀번호 확인" autoComplete="new-password"
+            style={{ flex: 1, border: "none", outline: "none", padding: "13px 0", fontSize: 15.5, color: T.ink, background: "transparent" }} />
+        </div>
+        <button onClick={save} disabled={loading}
+          style={{ width: "100%", padding: "14px 0", marginTop: 4, borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: ok ? T.sage : loading ? T.line : T.ink, color: loading ? T.muted : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+          {ok ? <><Check size={16} /> 저장됐어요</> : loading ? "저장 중…" : "비밀번호 저장"}
+        </button>
+        {err && <p style={{ margin: "12px 2px 0", fontSize: 13, color: T.rose, lineHeight: 1.5 }}>{err}</p>}
+      </div>
     </div>
   );
 }
