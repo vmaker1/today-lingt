@@ -36,40 +36,51 @@ const DIMS = [
 const DIM = Object.fromEntries(DIMS.map((d) => [d.key, d]));
 
 /* 믿음의 성장 여정 — 밭에서 열매까지 (pt: 누적 포인트 기준, day: 꾸준함 목표) */
+/* 믿음의 성장 여정 — "성실한 하루"(하루 60점 이상)를 며칠 쌓았는지로 자란다.
+   하루에 몰아서 해도 하루는 하루! 꾸준히 매일 와야 다음 단계로 넘어가요. */
+/* 하루 목표 점수 — 본인이 고를 수 있어요 (기본 60) */
+const GOAL_OPTIONS = [
+  { pts: 40,  emoji: "🌱", label: "가볍게", desc: "훈련 3~4개 · 부담 없이 매일" },
+  { pts: 60,  emoji: "🔥", label: "꾸준히", desc: "훈련 5~6개 · 균형 잡힌 하루" },
+  { pts: 100, emoji: "⚡", label: "깊이",   desc: "훈련 대부분 · 깊이 있는 하루" },
+];
+const DEFAULT_GOAL = 60;
+
 const STAGES = [
   { stage: "밭 고르기", emoji: "⛏️", steps: [
-    { label: "돌 고르기", pt: 20, day: "3일" },
-    { label: "비료 주기", pt: 40, day: "3일" },
+    { label: "돌 고르기", days: 3 },
+    { label: "비료 주기", days: 6 },
   ] },
   { stage: "씨앗", emoji: "🌰", steps: [
-    { label: "물 주기", pt: 60, day: "5일" },
-    { label: "양분 주기", pt: 90, day: "5일" },
+    { label: "물 주기", days: 11 },
+    { label: "양분 주기", days: 16 },
   ] },
   { stage: "새싹", emoji: "🌱", steps: [
-    { label: "물 주기", pt: 120, day: "10일" },
-    { label: "양분 주기", pt: 150, day: "10일" },
+    { label: "물 주기", days: 26 },
+    { label: "양분 주기", days: 36 },
   ] },
   { stage: "잎사귀", emoji: "🍃", steps: [
-    { label: "물 주기", pt: 190, day: "20일" },
-    { label: "양분 주기", pt: 230, day: "20일" },
+    { label: "물 주기", days: 56 },
+    { label: "양분 주기", days: 76 },
   ] },
   { stage: "나무", emoji: "🌳", steps: [
-    { label: "물 주기", pt: 290, day: "30일" },
-    { label: "양분 주기", pt: 350, day: "30일" },
+    { label: "물 주기", days: 106 },
+    { label: "양분 주기", days: 136 },
   ] },
   { stage: "열매", emoji: "🍎", steps: [
-    { label: "수확하기", pt: 430, day: "10일" },
+    { label: "수확하기", days: 146 },
   ] },
   { stage: "성령의 아홉 열매 도전", emoji: "🍇", steps: [
-    { label: "새로운 작품 시작", pt: 500, day: "새 여정" },
+    { label: "새로운 작품 시작", days: 156 },
   ] },
 ];
 const FLAT_STEPS = STAGES.flatMap((s) => s.steps.map((st) => ({ ...st, stage: s.stage, emoji: s.emoji })));
-const stageInfo = (p) => {
-  const doneCount = FLAT_STEPS.filter((s) => p >= s.pt).length;
-  const current = FLAT_STEPS.find((s) => p < s.pt) || FLAT_STEPS[FLAT_STEPS.length - 1];
-  const prev = [...FLAT_STEPS].reverse().find((s) => p >= s.pt);
-  return { current, prevPt: prev ? prev.pt : 0, doneCount };
+/* faithDays = 하루 60점 이상 달성한 날의 수 */
+const stageInfo = (faithDays) => {
+  const doneCount = FLAT_STEPS.filter((s) => faithDays >= s.days).length;
+  const current = FLAT_STEPS.find((s) => faithDays < s.days) || FLAT_STEPS[FLAT_STEPS.length - 1];
+  const prev = [...FLAT_STEPS].reverse().find((s) => faithDays >= s.days);
+  return { current, prevDays: prev ? prev.days : 0, doneCount };
 };
 
 /* 성령의 아홉 열매 (열매 수확 후 하나씩 키워 뱃지 획득) */
@@ -345,6 +356,10 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [points, setPoints] = useState(0);
   const [log, setLog] = useState([]);
+  const [dailyGoal, setDailyGoal] = useState(DEFAULT_GOAL); // 내가 정한 하루 목표
+  const [todayPts, setTodayPts] = useState(0);   // 오늘 얻은 점수
+  const [faithDays, setFaithDays] = useState(0); // 하루 60점 이상 달성한 날의 수
+  const [goalHitToday, setGoalHitToday] = useState(false);
   const [posts, setPosts] = useState(SEED_POSTS);
   const [toast, setToast] = useState(null);
 
@@ -421,6 +436,17 @@ export default function App() {
     setLog((l) => [{ id: Date.now() + Math.random(), label, pts, time: "방금" }, ...l]);
     setToast({ pts, label });
     setTimeout(() => setToast(null), 1700);
+    setTodayPts((t) => {
+      const nt = t + pts;
+      // 오늘 목표(60점)를 처음 넘긴 순간에만 '성실한 하루' 1일 적립
+      if (t < dailyGoal && nt >= dailyGoal && !goalHitToday) {
+        setGoalHitToday(true);
+        setFaithDays((d) => d + 1);
+        setTimeout(() => setToast({ pts: 0, label: "오늘의 성실한 하루 달성 ✦" }), 1800);
+        setTimeout(() => setToast(null), 3600);
+      }
+      return nt;
+    });
   };
 
   const completeDim = (key, note) => {
@@ -438,7 +464,7 @@ export default function App() {
   };
 
   const doneCount = DIMS.filter((d) => done7[d.key]).length;
-  const ctx = { tab, setTab, points, log, posts, setPosts, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, rooms, setRooms, threads, setThreads, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents };
+  const ctx = { tab, setTab, points, log, posts, setPosts, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, rooms, setRooms, threads, setThreads, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal };
 
   return (
     <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
@@ -467,7 +493,7 @@ export default function App() {
         {toast && (
           <div style={{ position: "absolute", left: "50%", bottom: 100, transform: "translateX(-50%)", background: T.ink, color: "#fff", padding: "10px 16px", borderRadius: 999, display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap", boxShadow: "0 8px 24px rgba(32,42,68,.35)", animation: "pop .25s ease", zIndex: 50 }}>
             <Sparkles size={15} color={T.gold} />
-            <span style={{ fontSize: 14.5, fontWeight: 500 }}>{toast.label} · <b style={{ color: T.gold }}>+{toast.pts}P</b></span>
+            <span style={{ fontSize: 14.5, fontWeight: 500 }}>{toast.label}{toast.pts ? <> · <b style={{ color: T.gold }}>+{toast.pts}P</b></> : null}</span>
           </div>
         )}
 
@@ -481,7 +507,7 @@ export default function App() {
    홈
 ────────────────────────────────────────────── */
 function Home(ctx) {
-  const { done7, doneCount, setSheet, memDone, memStreak, doMemorize, threads, rooms, setTab, verseToday } = ctx;
+  const { done7, doneCount, setSheet, memDone, memStreak, doMemorize, threads, rooms, setTab, verseToday, todayPts, dailyGoal } = ctx;
   const hour = new Date().getHours();
   const greet = hour < 11 ? "좋은 아침이에요" : hour < 18 ? "평안한 오후예요" : "고요한 저녁이에요";
 
@@ -528,7 +554,7 @@ function Home(ctx) {
               })}
             </div>
             <p style={{ margin: "9px 0 0", fontSize: 13.5, color: "rgba(255,255,255,.75)" }}>
-              {doneCount === DIMS.length ? "오늘의 신앙 훈련을 모두 밝혔어요 ✦" : <>오늘의 신앙 훈련 <b style={{ color: T.gold }}>{doneCount}</b> / {DIMS.length}</>}
+              {doneCount === DIMS.length ? "오늘의 신앙 훈련을 모두 밝혔어요 ✦" : <>오늘의 신앙 훈련 <b style={{ color: T.gold }}>{doneCount}</b> / {DIMS.length} · 오늘 <b style={{ color: T.gold }}>{todayPts}</b>/{dailyGoal}P</>}
             </p>
           </div>
         </div>
@@ -1295,27 +1321,54 @@ function InviteSheet({ onClose, share }) {
 /* ─────────────────────────────────────────────
    포인트
 ────────────────────────────────────────────── */
-function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit }) {
-  const { current, prevPt } = stageInfo(points);
-  const span = current.pt - prevPt;
-  const pct = span > 0 ? Math.min(100, ((points - prevPt) / span) * 100) : 100;
-  const week = [45, 30, 60, 0, 40, 0, points % 60];
+function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal }) {
+  const { current, prevDays } = stageInfo(faithDays);
+  const span = current.days - prevDays;
+  const pct = span > 0 ? Math.min(100, ((faithDays - prevDays) / span) * 100) : 100;
+  const week = [45, 30, 60, 0, 40, 0, todayPts];
   const [fruitOpen, setFruitOpen] = useState(false);
+  const todayPct = Math.min(100, (todayPts / dailyGoal) * 100);
+  const [goalOpen, setGoalOpen] = useState(false);
+  const myGoal = GOAL_OPTIONS.find((g) => g.pts === dailyGoal) || GOAL_OPTIONS[1];
 
   return (
     <div>
       <Header title="포인트" subtitle="꾸준함이 자라 열매가 됩니다" />
       <div style={{ padding: "0 16px" }}>
-        <div style={{ background: `linear-gradient(160deg, ${T.ink}, #3A335E)`, borderRadius: 18, padding: "22px 20px", color: "#fff", marginBottom: 16, position: "relative", overflow: "hidden" }}>
+        {/* 오늘의 목표 */}
+        <div style={{ background: goalHitToday ? `linear-gradient(150deg, ${T.sage}, #4A6B52)` : `linear-gradient(160deg, ${T.ink}, #3A335E)`, borderRadius: 18, padding: "20px", color: "#fff", marginBottom: 12, position: "relative", overflow: "hidden" }}>
           <StarField faint />
           <div style={{ position: "relative", zIndex: 2 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3 }}><span style={{ fontSize: 17.5 }}>{current.emoji}</span><span style={{ fontSize: 14, color: T.gold, fontWeight: 700, letterSpacing: .5 }}>{current.stage} · {current.label}</span></div>
-            <div style={{ fontFamily: serif, fontSize: 41.5, fontWeight: 700, lineHeight: 1 }}>{points}<span style={{ fontSize: 17.5, marginLeft: 4, opacity: .7 }}>P</span></div>
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, opacity: .8, marginBottom: 6 }}><span>다음 · {current.label}</span><span>{points >= current.pt ? "달성 ✦" : `${current.pt - points}P 남음 · 꾸준함 ${current.day}`}</span></div>
-              <div style={{ height: 7, borderRadius: 999, background: "rgba(255,255,255,.15)" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${T.gold}, ${T.goldGlow})`, transition: "width .6s ease" }} /></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, color: goalHitToday ? "#fff" : T.gold, fontWeight: 700 }}>오늘의 목표 · {dailyGoal}P</span>
+              <span style={{ fontSize: 12.5, opacity: .85 }}>{goalHitToday ? "오늘 달성 ✦" : `${Math.max(0, dailyGoal - todayPts)}P 남음`}</span>
             </div>
+            <div style={{ fontFamily: serif, fontSize: 38, fontWeight: 700, lineHeight: 1 }}>{todayPts}<span style={{ fontSize: 16, marginLeft: 4, opacity: .7 }}>/ {dailyGoal}P</span></div>
+            <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,.15)", marginTop: 14 }}>
+              <div style={{ width: `${todayPct}%`, height: "100%", borderRadius: 999, background: goalHitToday ? "#fff" : `linear-gradient(90deg, ${T.gold}, ${T.goldGlow})`, transition: "width .6s ease" }} />
+            </div>
+            <button onClick={() => setGoalOpen(true)} style={{ marginTop: 12, width: "100%", padding: "9px 0", borderRadius: 10, background: "rgba(255,255,255,.15)", color: "#fff", fontSize: 12.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              {myGoal.emoji} {myGoal.label} · 목표 바꾸기
+            </button>
+            <p style={{ margin: "9px 0 0", fontSize: 11.5, opacity: .75, lineHeight: 1.5 }}>목표를 넘긴 날 <b>성실한 하루</b> 1일이 쌓여요. 몰아서 해도 하루는 하루예요.</p>
           </div>
+        </div>
+
+        {/* 성실한 날 · 현재 단계 */}
+        <div style={{ background: T.card, borderRadius: 16, padding: 16, border: `1px solid ${T.line}`, marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 700, color: T.ink }}><span style={{ fontSize: 17 }}>{current.emoji}</span>{current.stage} · {current.label}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: T.gold }}>총 {points}P</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
+            <span style={{ fontFamily: serif, fontSize: 30, fontWeight: 700, color: T.ink }}>{faithDays}</span>
+            <span style={{ fontSize: 13.5, color: T.muted }}>일째 성실하게 걷는 중 🔥</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: T.muted, marginBottom: 6 }}>
+            <span>다음 · {current.label}</span>
+            <span>{faithDays >= current.days ? "달성 ✦" : `${current.days - faithDays}일 더 · 총 ${current.days}일`}</span>
+          </div>
+          <div style={{ height: 7, borderRadius: 999, background: "#F1EDE3" }}><div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${T.gold}, ${T.goldGlow})`, transition: "width .6s ease" }} /></div>
         </div>
 
         <div style={{ background: T.card, borderRadius: 16, padding: 16, border: `1px solid ${T.line}`, marginBottom: 16 }}>
@@ -1348,9 +1401,9 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
           <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 700, color: T.ink }}>믿음의 성장 여정</p>
           <p style={{ margin: "0 0 14px", fontSize: 13, color: T.muted }}>{growingFruit ? `지금 키우는 열매 · ${FRUIT[growingFruit].emoji} ${FRUIT[growingFruit].name}` : "밭을 고르고 씨를 뿌려, 자라 열매 맺기까지"}</p>
           {STAGES.map((s, si) => {
-            const allDone = s.steps.every((st) => points >= st.pt);
-            const isCurrent = s.stage === stageInfo(points).current.stage;
-            const started = points >= (si === 0 ? 0 : STAGES[si - 1].steps[STAGES[si - 1].steps.length - 1].pt);
+            const allDone = s.steps.every((st) => faithDays >= st.days);
+            const isCurrent = s.stage === stageInfo(faithDays).current.stage;
+            const started = faithDays >= (si === 0 ? 0 : STAGES[si - 1].steps[STAGES[si - 1].steps.length - 1].days);
             return (
               <div key={s.stage} style={{ display: "flex", gap: 11, marginBottom: 14 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -1366,12 +1419,12 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
                   </div>
                   <div style={{ display: "grid", gap: 5, marginTop: 7 }}>
                     {s.steps.map((st) => {
-                      const d = points >= st.pt;
+                      const d = faithDays >= st.days;
                       return (
                         <div key={st.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ width: 15, height: 15, borderRadius: 999, flexShrink: 0, background: d ? T.sage : "transparent", border: d ? "none" : `2px solid ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>{d && <Check size={9} color="#fff" />}</span>
                           <span style={{ fontSize: 14, color: d ? T.ink : T.muted, fontWeight: d ? 600 : 400 }}>{st.label}</span>
-                          <span style={{ fontSize: 11.5, color: T.muted, marginLeft: "auto" }}>누적 {st.pt}P · 꾸준함 {st.day}</span>
+                          <span style={{ fontSize: 11.5, color: T.muted, marginLeft: "auto" }}>성실한 {st.days}일</span>
                         </div>
                       );
                     })}
@@ -1401,7 +1454,34 @@ function Points({ points, log, earnedFruits, growingFruit, growStep, selectFruit
       </div>
 
       {fruitOpen && <FruitChallenge onClose={() => setFruitOpen(false)} earnedFruits={earnedFruits} growingFruit={growingFruit} growStep={growStep} selectFruit={selectFruit} growAction={growAction} harvestFruit={harvestFruit} />}
+      {goalOpen && <GoalSheet current={dailyGoal} onPick={(g) => { setDailyGoal(g); setGoalOpen(false); }} onClose={() => setGoalOpen(false)} />}
     </div>
+  );
+}
+
+function GoalSheet({ current, onPick, onClose }) {
+  return (
+    <Sheet onClose={onClose} accent={T.gold} title={<>🎯 하루 목표 정하기</>}>
+      <p style={{ margin: "0 0 14px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+        내 상황에 맞는 목표를 골라요. 목표를 넘긴 날이 <b style={{ color: T.ink }}>성실한 하루</b>로 쌓여 믿음의 나무가 자라요.
+      </p>
+      <div style={{ display: "grid", gap: 9 }}>
+        {GOAL_OPTIONS.map((g) => {
+          const on = g.pts === current;
+          return (
+            <button key={g.pts} onClick={() => onPick(g.pts)} style={{ display: "flex", alignItems: "center", gap: 12, textAlign: "left", padding: "14px 15px", borderRadius: 13, background: on ? T.goldSoft : T.card, border: `2px solid ${on ? T.gold : T.line}` }}>
+              <span style={{ fontSize: 24, flexShrink: 0 }}>{g.emoji}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: T.ink }}>{g.label} · 하루 {g.pts}P</p>
+                <p style={{ margin: "2px 0 0", fontSize: 12.5, color: T.muted }}>{g.desc}</p>
+              </div>
+              {on && <span style={{ width: 22, height: 22, borderRadius: 999, background: T.gold, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Check size={13} color="#fff" /></span>}
+            </button>
+          );
+        })}
+      </div>
+      <p style={{ margin: "14px 2px 0", fontSize: 11.5, color: T.muted, lineHeight: 1.5, textAlign: "center" }}>목표를 바꿔도 지금까지 쌓은 성실한 날은 그대로 남아요 ✦</p>
+    </Sheet>
   );
 }
 
@@ -1500,14 +1580,14 @@ function FruitChallenge({ onClose, earnedFruits, growingFruit, growStep, selectF
 /* ─────────────────────────────────────────────
    내 정보 · 회원가입
 ────────────────────────────────────────────── */
-function Me({ user, profileComplete, authReady, points, signOut, isAdmin, dbContents, dbVerses, loadContents }) {
+function Me({ user, profileComplete, authReady, points, signOut, isAdmin, dbContents, dbVerses, loadContents, faithDays }) {
   const [admin, setAdmin] = useState(false);
   if (!authReady) return <div style={{ padding: 60, textAlign: "center", color: T.muted, fontSize: 14 }}>불러오는 중…</div>;
   if (!user) return <SignIn />;
   if (!profileComplete) return <ProfileSetup user={user} />;
   return (
     <>
-      <Profile user={user} points={points} onOut={signOut} isAdmin={isAdmin} onAdmin={() => setAdmin(true)} />
+      <Profile user={user} points={points} onOut={signOut} isAdmin={isAdmin} onAdmin={() => setAdmin(true)} faithDays={faithDays} />
       {admin && <AdminPanel onClose={() => setAdmin(false)} dbContents={dbContents} dbVerses={dbVerses} reload={loadContents} />}
     </>
   );
@@ -1665,8 +1745,8 @@ function TextArea({ label, placeholder, value, onChange }) {
   );
 }
 
-function Profile({ user, points, onOut, isAdmin, onAdmin }) {
-  const st = stageInfo(points).current;
+function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
+  const st = stageInfo(faithDays).current;
   const [invite, setInvite] = useState(false);
   const [safety, setSafety] = useState(false);
   const kakao = user.method === "kakao";
