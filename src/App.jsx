@@ -2233,21 +2233,14 @@ function InfoRow({ icon: Icon, label, value, last }) {
 }
 
 function SignIn() {
+  const [mode, setMode] = useState("login");   // login | signup | reset
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
 
-  const sendLink = async () => {
-    if (!email.trim() || loading) return;
-    setLoading(true); setErr("");
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
-    });
-    setLoading(false);
-    if (error) setErr(error.message); else setSent(true);
-  };
   const kakao = async () => {
     setErr("");
     const { error } = await supabase.auth.signInWithOAuth({
@@ -2256,6 +2249,42 @@ function SignIn() {
     });
     if (error) setErr(error.message);
   };
+
+  const submit = async () => {
+    setErr(""); setMsg("");
+    const e = email.trim();
+    if (!e) return setErr("이메일을 입력해 주세요.");
+
+    if (mode === "reset") {
+      setLoading(true);
+      const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo: window.location.origin });
+      setLoading(false);
+      if (error) setErr(error.message);
+      else setMsg("비밀번호 재설정 메일을 보냈어요. 메일함을 확인해 주세요.");
+      return;
+    }
+
+    if (pw.length < 6) return setErr("비밀번호는 6자 이상으로 정해 주세요.");
+    if (mode === "signup" && pw !== pw2) return setErr("비밀번호가 서로 달라요.");
+
+    setLoading(true);
+    if (mode === "signup") {
+      const { error } = await supabase.auth.signUp({ email: e, password: pw });
+      setLoading(false);
+      if (error) {
+        setErr(error.message.includes("already") ? "이미 가입된 이메일이에요. 로그인해 주세요." : error.message);
+      } else {
+        setMsg("가입됐어요! 바로 로그인해 주세요.");
+        setMode("login"); setPw(""); setPw2("");
+      }
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email: e, password: pw });
+      setLoading(false);
+      if (error) setErr(error.message.includes("Invalid") ? "이메일 또는 비밀번호가 맞지 않아요." : error.message);
+    }
+  };
+
+  const TABS = [{ k: "login", l: "로그인" }, { k: "signup", l: "회원가입" }];
 
   return (
     <div>
@@ -2266,30 +2295,67 @@ function SignIn() {
           <p style={{ margin: "9px 0 0", fontSize: 12.5, color: T.goldDeep, fontWeight: 700 }}>마태복음 11:28 · 함께 걸어요</p>
         </div>
 
-        {sent ? (
-          <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.line}`, padding: "26px 20px", textAlign: "center" }}>
-            <div style={{ width: 54, height: 54, borderRadius: 16, background: T.sageSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><Mail size={26} color={T.sage} /></div>
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>메일함을 확인해 주세요</p>
-            <p style={{ margin: "8px 0 0", fontSize: 13.5, color: T.muted, lineHeight: 1.6 }}><b style={{ color: T.inkSoft }}>{email}</b> 로 로그인 링크를 보냈어요.<br />메일의 링크를 누르면 로그인돼요.</p>
-            <button onClick={() => setSent(false)} style={{ marginTop: 16, fontSize: 13.5, color: T.gold, fontWeight: 700 }}>다른 이메일로 다시 하기</button>
-          </div>
-        ) : (
-          <div>
-            <button onClick={kakao} style={{ width: "100%", padding: "15px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: "#FEE500", color: "#3A1D1D", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 16 }}>
-              <MessageCircle size={18} fill="#3A1D1D" color="#3A1D1D" /> 카카오로 시작하기
-            </button>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 16px" }}>
-              <div style={{ flex: 1, height: 1, background: T.line }} /><span style={{ fontSize: 12, color: T.muted }}>또는 이메일로</span><div style={{ flex: 1, height: 1, background: T.line }} />
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 13px", marginBottom: 10 }}>
-              <Mail size={17} color={T.gold} />
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" style={{ flex: 1, border: "none", outline: "none", padding: "13px 0", fontSize: 15.5, color: T.ink, background: "transparent" }} />
-            </div>
-            <button onClick={sendLink} disabled={!email.trim() || loading} style={{ width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: (!email.trim() || loading) ? T.line : T.ink, color: (!email.trim() || loading) ? T.muted : "#fff" }}>{loading ? "보내는 중…" : "이메일로 로그인 링크 받기"}</button>
-            {err && <p style={{ margin: "12px 2px 0", fontSize: 12.5, color: T.rose, lineHeight: 1.5 }}>{err}</p>}
-            <p style={{ margin: "14px 6px 0", fontSize: 12, color: T.muted, lineHeight: 1.6, textAlign: "center" }}>처음이면 자동으로 가입돼요. 시작하면 <b style={{ color: T.inkSoft }}>이용약관</b>·<b style={{ color: T.inkSoft }}>커뮤니티 규칙</b>에 동의하는 것으로 여겨요.</p>
+        <button onClick={kakao} style={{ width: "100%", padding: "15px 0", borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: "#FEE500", color: "#3A1D1D", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 16 }}>
+          <MessageCircle size={18} fill="#3A1D1D" color="#3A1D1D" /> 카카오로 시작하기
+        </button>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <div style={{ flex: 1, height: 1, background: T.line }} /><span style={{ fontSize: 12, color: T.muted }}>또는 이메일로</span><div style={{ flex: 1, height: 1, background: T.line }} />
+        </div>
+
+        {mode !== "reset" && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            {TABS.map((t) => (
+              <button key={t.k} onClick={() => { setMode(t.k); setErr(""); setMsg(""); }}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 14, fontWeight: 700, background: mode === t.k ? T.ink : T.card, color: mode === t.k ? "#fff" : T.muted, border: `1px solid ${mode === t.k ? T.ink : T.line}` }}>{t.l}</button>
+            ))}
           </div>
         )}
+
+        {mode === "reset" && (
+          <button onClick={() => { setMode("login"); setErr(""); setMsg(""); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13.5, color: T.muted, fontWeight: 600, marginBottom: 12 }}><ChevronLeft size={15} /> 로그인으로</button>
+        )}
+
+        {/* 이메일 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 9, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 13px", marginBottom: 9 }}>
+          <Mail size={17} color={T.gold} />
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" autoComplete="username"
+            style={{ flex: 1, border: "none", outline: "none", padding: "13px 0", fontSize: 15.5, color: T.ink, background: "transparent" }} />
+        </div>
+
+        {/* 비밀번호 */}
+        {mode !== "reset" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 9, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 13px", marginBottom: 9 }}>
+            <Lock size={17} color={T.gold} />
+            <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder={mode === "signup" ? "비밀번호 (6자 이상)" : "비밀번호"} autoComplete={mode === "signup" ? "new-password" : "current-password"}
+              style={{ flex: 1, border: "none", outline: "none", padding: "13px 0", fontSize: 15.5, color: T.ink, background: "transparent" }} />
+          </div>
+        )}
+
+        {/* 비밀번호 확인 (가입 시) */}
+        {mode === "signup" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 9, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "0 13px", marginBottom: 9 }}>
+            <Lock size={17} color={T.muted} />
+            <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder="비밀번호 확인" autoComplete="new-password"
+              style={{ flex: 1, border: "none", outline: "none", padding: "13px 0", fontSize: 15.5, color: T.ink, background: "transparent" }} />
+          </div>
+        )}
+
+        <button onClick={submit} disabled={loading}
+          style={{ width: "100%", padding: "14px 0", marginTop: 4, borderRadius: 12, fontSize: 15.5, fontWeight: 700, background: loading ? T.line : T.ink, color: loading ? T.muted : "#fff" }}>
+          {loading ? "잠시만요…" : mode === "signup" ? "가입하기" : mode === "reset" ? "재설정 메일 받기" : "로그인"}
+        </button>
+
+        {mode === "login" && (
+          <button onClick={() => { setMode("reset"); setErr(""); setMsg(""); }} style={{ width: "100%", marginTop: 11, fontSize: 13, color: T.muted, fontWeight: 600 }}>비밀번호를 잊으셨나요?</button>
+        )}
+
+        {err && <p style={{ margin: "12px 2px 0", fontSize: 13, color: T.rose, lineHeight: 1.5 }}>{err}</p>}
+        {msg && <p style={{ margin: "12px 2px 0", fontSize: 13, color: T.sage, fontWeight: 600, lineHeight: 1.5 }}>{msg}</p>}
+
+        <p style={{ margin: "16px 6px 0", fontSize: 12, color: T.muted, lineHeight: 1.6, textAlign: "center" }}>시작하면 <b style={{ color: T.inkSoft }}>이용약관</b>·<b style={{ color: T.inkSoft }}>커뮤니티 규칙</b>에 동의하는 것으로 여겨요.</p>
       </div>
     </div>
   );
