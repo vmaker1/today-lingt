@@ -468,8 +468,32 @@ export default function App() {
     })();
   }, [session]);
 
-  // ── 바뀌면 저장 ──
+  // ── 루틴 알림 (앱이 열려 있을 때 정해진 시간에 알림) ──
   const uid = session?.user?.id;
+  useEffect(() => {
+    if (!uid || typeof window === "undefined" || typeof Notification === "undefined") return;
+    let fired = {};
+    const tick = async () => {
+      if (Notification.permission !== "granted") return;
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const dow = now.getDay();
+      const stamp = `${todayKey()} ${hhmm}`;
+      if (fired[stamp]) return;
+      const { data } = await supabase.from("routines").select("*").eq("user_id", uid).eq("active", true);
+      (data || []).forEach((r) => {
+        if (r.time?.slice(0, 5) === hhmm && (r.days || []).includes(dow)) {
+          fired[stamp] = true;
+          new Notification("오늘의 빛 ✦", { body: `${r.title} 시간이에요. 함께 걸어요 🌱`, icon: "/favicon.ico" });
+        }
+      });
+    };
+    const id = setInterval(tick, 30000);
+    tick();
+    return () => clearInterval(id);
+  }, [uid]);
+
+  // ── 바뀌면 저장 ──
   useEffect(() => {
     if (!uid || !loaded) return;
     supabase.from("profiles").update({
@@ -514,12 +538,12 @@ export default function App() {
     });
   };
 
-  const completeDim = async (key, note) => {
+  const completeDim = async (key, note, isPublic = false) => {
     const first = !done7[key];
     setDone7((d) => ({ ...d, [key]: true }));
-    setJournal((j) => [{ id: Date.now(), date: todayKey(), dim: key, note: (note || "").trim(), time: "방금" }, ...j]);
+    setJournal((j) => [{ id: Date.now(), date: todayKey(), dim: key, note: (note || "").trim(), time: "방금", is_public: isPublic }, ...j]);
     if (first) award(DIM[key].pts, `${DIM[key].label} 훈련`);
-    if (uid) await supabase.from("journal").insert({ user_id: uid, day: todayKey(), dim: key, note: (note || "").trim() });
+    if (uid) await supabase.from("journal").insert({ user_id: uid, day: todayKey(), dim: key, note: (note || "").trim(), is_public: isPublic });
   };
 
   const doMemorize = () => {
@@ -744,6 +768,7 @@ function MemorizeModal({ verse, onClose, onDone, done }) {
 function TrainSheet({ dimKey, done, onClose, onComplete, byCat, verseToday }) {
   const dim = DIM[dimKey];
   const [note, setNote] = useState("");
+  const [pub, setPub] = useState(false);
   const [web, setWeb] = useState(null);
   const Ic = dim.icon;
   const openWeb = (url, title, kind) => setWeb({ url, title, kind });
@@ -758,14 +783,22 @@ function TrainSheet({ dimKey, done, onClose, onComplete, byCat, verseToday }) {
       <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={dim.prompt}
         style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px 13px", fontSize: 14.5, lineHeight: 1.6, color: T.ink, outline: "none", resize: "none", background: T.paper }} />
 
-      <button onClick={() => { onComplete(dimKey, note); onClose(); }} disabled={done}
+      <button onClick={() => setPub((v) => !v)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, background: pub ? T.sageSoft : T.card, border: `1px solid ${pub ? T.sage : T.line}`, borderRadius: 11, padding: "11px 13px", marginTop: 10, marginBottom: 2, textAlign: "left" }}>
+        <span style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, background: pub ? T.sage : "#fff", border: `1px solid ${pub ? T.sage : T.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>{pub && <Check size={12} color="#fff" />}</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: T.ink }}>{pub ? "함께 나눔에 공개" : "나만 보기 (비공개)"}</span>
+          <span style={{ display: "block", fontSize: 11.5, color: T.muted, marginTop: 1 }}>{pub ? "다른 지체들이 이 후기를 볼 수 있어요" : "이 후기는 나만 볼 수 있어요"}</span>
+        </span>
+        {pub ? <Users size={16} color={T.sage} /> : <Lock size={15} color={T.muted} />}
+      </button>
+      <button onClick={() => { onComplete(dimKey, note, pub); onClose(); }} disabled={done}
         style={{ width: "100%", padding: "13px 0", marginTop: 12, borderRadius: 12, fontSize: 16, fontWeight: 700, background: done ? T.sageSoft : dim.c, color: done ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
         {done ? <><Check size={16} /> 오늘 완료됨</> : <><PenLine size={15} /> 훈련 완료 · 일기 저장 · +{dim.pts}P</>}
       </button>
 
       {web && <WebView url={web.url} title={web.title} kind={web.kind} onClose={() => setWeb(null)}
         note={note} setNote={setNote} done={done} dim={dim}
-        onComplete={() => { onComplete(dimKey, note); setWeb(null); onClose(); }} />}
+        onComplete={() => { onComplete(dimKey, note, pub); setWeb(null); onClose(); }} />}
     </Sheet>
   );
 }
@@ -904,10 +937,54 @@ function BibleFinder({ openWeb }) {
   const [q, setQ] = useState("");
   const [found, setFound] = useState(null);
   const [ver, setVer] = useState("ko");   // ko | asv | kjv
+  const [speaking, setSpeaking] = useState(false);
+  const [rate, setRate] = useState(1);      // 읽기 속도
+  const [readSet, setReadSet] = useState(new Set()); // 읽은 장 "책번호:장"
+  const [uid, setUid] = useState(null);
   const books = testament === "ot" ? BIBLE_OT : BIBLE_NT;
+  const bookNo = (name) => {
+    const oi = BIBLE_OT.findIndex((b) => b[0] === name);
+    if (oi >= 0) return oi + 1;
+    const ni = BIBLE_NT.findIndex((b) => b[0] === name);
+    return ni >= 0 ? 39 + ni + 1 : 0;
+  };
+
+  useEffect(() => {
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      const id = u?.user?.id; setUid(id);
+      if (!id) return;
+      const { data } = await supabase.from("bible_progress").select("book_no, chapter").eq("user_id", id);
+      if (data) setReadSet(new Set(data.map((r) => `${r.book_no}:${r.chapter}`)));
+    })();
+    return () => { if (typeof window !== "undefined") window.speechSynthesis?.cancel(); };
+  }, []);
+
+  const markRead = async (name, ch) => {
+    const no = bookNo(name);
+    const key = `${no}:${ch}`;
+    if (readSet.has(key) || !uid) return;
+    setReadSet((s) => new Set(s).add(key));
+    await supabase.from("bible_progress").insert({ user_id: uid, book_no: no, chapter: ch });
+  };
+
+  const speak = (list, name, ch) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const synth = window.speechSynthesis;
+    if (speaking) { synth.cancel(); setSpeaking(false); return; }
+    const text = list.map((v) => `${v.verse}절. ${v[ver] || ""}`).join(" ");
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = ver === "ko" ? "ko-KR" : "en-US";
+    u.rate = rate;
+    u.onend = () => { setSpeaking(false); markRead(name, ch); };  // 다 읽으면 자동 체크
+    u.onerror = () => setSpeaking(false);
+    synth.cancel(); synth.speak(u); setSpeaking(true);
+  };
   const VERS = [{ k: "ko", l: "개역한글" }, { k: "asv", l: "ASV" }, { k: "kjv", l: "KJV" }];
 
   const openChapter = async (name, ch) => {
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    setSpeaking(false);
     setChapter(ch); setLoading(true); setVerses([]);
     const { data } = await supabase.from("bible").select("verse, ko, asv, kjv")
       .eq("book", name).eq("chapter", ch).order("verse");
@@ -928,10 +1005,30 @@ function BibleFinder({ openWeb }) {
       <div>
         <button onClick={() => { setChapter(null); setVerses([]); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, color: T.muted, fontWeight: 600, marginBottom: 10 }}><ChevronLeft size={15} /> 장 선택</button>
         <p style={{ margin: "0 0 9px", fontFamily: serif, fontSize: 19, fontWeight: 700, color: T.ink }}>{book[0]} {chapter}장</p>
-        <div style={{ display: "flex", gap: 5, marginBottom: 11 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 10 }}>
           {VERS.map((v) => (
             <button key={v.k} onClick={() => setVer(v.k)} style={{ fontSize: 12, fontWeight: 700, padding: "5px 11px", borderRadius: 999, background: ver === v.k ? T.ink : T.card, color: ver === v.k ? "#fff" : T.muted, border: `1px solid ${ver === v.k ? T.ink : T.line}` }}>{v.l}</button>
           ))}
+          {readSet.has(`${bookNo(book[0])}:${chapter}`) && (
+            <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, color: T.sage, background: T.sageSoft, borderRadius: 999, padding: "3px 9px" }}><Check size={11} /> 읽음</span>
+          )}
+        </div>
+
+        {/* 음성으로 듣기 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "9px 11px", marginBottom: 11 }}>
+          <button onClick={() => speak(verses, book[0], chapter)} disabled={!verses.length}
+            style={{ width: 34, height: 34, borderRadius: 999, flexShrink: 0, background: speaking ? T.rose : T.ink, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {speaking ? <X size={16} color="#fff" /> : <Play size={15} color="#fff" fill="#fff" />}
+          </button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: T.ink }}>{speaking ? "읽는 중… (누르면 정지)" : "성경 읽어주기"}</p>
+            <p style={{ margin: "1px 0 0", fontSize: 11, color: T.muted }}>다 들으면 읽기표에 자동 체크돼요</p>
+          </div>
+          <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+            {[0.75, 1, 1.25, 1.5].map((r) => (
+              <button key={r} onClick={() => setRate(r)} style={{ fontSize: 11, fontWeight: 700, padding: "4px 7px", borderRadius: 7, background: rate === r ? T.gold : "transparent", color: rate === r ? "#fff" : T.muted, border: `1px solid ${rate === r ? T.gold : T.line}` }}>{r}x</button>
+            ))}
+          </div>
         </div>
         {loading ? <p style={{ fontSize: 14, color: T.muted, textAlign: "center", padding: 24 }}>불러오는 중…</p> : verses.length === 0 ? (
           <p style={{ fontSize: 13.5, color: T.muted, textAlign: "center", padding: 24, lineHeight: 1.6 }}>본문을 불러오지 못했어요.<br />성경 데이터가 등록되었는지 확인해 주세요.</p>
@@ -949,6 +1046,11 @@ function BibleFinder({ openWeb }) {
           {chapter > 1 && <button onClick={() => openChapter(book[0], chapter - 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 13.5, fontWeight: 700, color: T.inkSoft }}>← {chapter - 1}장</button>}
           {chapter < book[1] && <button onClick={() => openChapter(book[0], chapter + 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 13.5, fontWeight: 700, color: T.inkSoft }}>{chapter + 1}장 →</button>}
         </div>
+        <button onClick={() => markRead(book[0], chapter)} disabled={readSet.has(`${bookNo(book[0])}:${chapter}`)}
+          style={{ width: "100%", padding: "11px 0", marginTop: 8, borderRadius: 10, fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            background: readSet.has(`${bookNo(book[0])}:${chapter}`) ? T.sageSoft : T.card, color: readSet.has(`${bookNo(book[0])}:${chapter}`) ? T.sage : T.inkSoft, border: `1px solid ${T.line}` }}>
+          <Check size={14} /> {readSet.has(`${bookNo(book[0])}:${chapter}`) ? "읽기표에 기록됨" : "이 장 읽음으로 표시"}
+        </button>
         <p style={{ margin: "9px 2px 0", fontSize: 11, color: T.muted, textAlign: "center" }}>개역한글(1961) · ASV(1901) · KJV(1611) — 모두 공개 도메인</p>
       </div>
     );
@@ -959,11 +1061,28 @@ function BibleFinder({ openWeb }) {
     return (
       <div>
         <button onClick={() => setBook(null)} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, color: T.muted, fontWeight: 600, marginBottom: 10 }}><ChevronLeft size={15} /> 성경 목록</button>
-        <p style={{ margin: "0 0 10px", fontSize: 15.5, fontWeight: 700, color: T.ink }}>{book[0]} <span style={{ fontSize: 13.5, color: T.muted, fontWeight: 400 }}>· 전체 {book[1]}장</span></p>
+        <p style={{ margin: "0 0 4px", fontSize: 15.5, fontWeight: 700, color: T.ink }}>{book[0]} <span style={{ fontSize: 13.5, color: T.muted, fontWeight: 400 }}>· 전체 {book[1]}장</span></p>
+        {(() => {
+          const no = bookNo(book[0]);
+          const read = Array.from({ length: book[1] }).filter((_, i) => readSet.has(`${no}:${i + 1}`)).length;
+          return (
+            <div style={{ marginBottom: 11 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: T.muted, marginBottom: 5 }}>
+                <span>읽기표</span><span>{read} / {book[1]}장</span>
+              </div>
+              <div style={{ height: 6, borderRadius: 999, background: "#F1EDE3" }}>
+                <div style={{ width: `${(read / book[1]) * 100}%`, height: "100%", borderRadius: 999, background: T.sage, transition: "width .4s ease" }} />
+              </div>
+            </div>
+          );
+        })()}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6, maxHeight: 240, overflowY: "auto" }}>
-          {Array.from({ length: book[1] }).map((_, i) => (
-            <button key={i} onClick={() => openChapter(book[0], i + 1)} style={{ padding: "9px 0", borderRadius: 8, background: T.card, border: `1px solid ${T.line}`, fontSize: 14, fontWeight: 700, color: T.inkSoft }}>{i + 1}</button>
-          ))}
+          {Array.from({ length: book[1] }).map((_, i) => {
+            const done = readSet.has(`${bookNo(book[0])}:${i + 1}`);
+            return (
+              <button key={i} onClick={() => openChapter(book[0], i + 1)} style={{ padding: "9px 0", borderRadius: 8, background: done ? T.sage : T.card, border: `1px solid ${done ? T.sage : T.line}`, fontSize: 14, fontWeight: 700, color: done ? "#fff" : T.inkSoft }}>{i + 1}</button>
+            );
+          })}
         </div>
       </div>
     );
@@ -1316,6 +1435,7 @@ function Community(ctx) {
         {sub === "dm" && <Messages {...ctx} />}
       </div>
 
+      {routineOpen && <RoutineSheet onClose={() => setRoutineOpen(false)} />}
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
     </div>
   );
@@ -1373,40 +1493,199 @@ function Feed({ posts, setPosts, award }) {
 }
 
 /* ── 방 (그룹) ── */
-function Rooms({ rooms, setRooms, award }) {
-  const [open, setOpen] = useState(null);
+function Rooms({ award }) {
+  const [rooms, setRooms] = useState([]);
+  const [members, setMembers] = useState([]);   // 내 멤버십
+  const [counts, setCounts] = useState({});     // 방별 인원
+  const [pending, setPending] = useState({});   // 방별 신청 수 (방장용)
+  const [uid, setUid] = useState(null);
   const [creating, setCreating] = useState(false);
-  if (open) { const room = rooms.find((r) => r.id === open); if (room) return <RoomDetail room={room} setRooms={setRooms} award={award} onBack={() => setOpen(null)} />; }
+  const [tab, setTab] = useState("all");        // all | mine
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    const { data: u } = await supabase.auth.getUser();
+    const id = u?.user?.id; setUid(id);
+    const { data: rs } = await supabase.from("rooms").select("*").order("created_at", { ascending: false });
+    const { data: ms } = await supabase.from("room_members").select("*");
+    setRooms(rs || []);
+    const mine = (ms || []).filter((m) => m.user_id === id);
+    setMembers(mine);
+    const c = {}, p = {};
+    (ms || []).forEach((m) => {
+      if (m.status === "member") c[m.room_id] = (c[m.room_id] || 0) + 1;
+      if (m.status === "pending") p[m.room_id] = (p[m.room_id] || 0) + 1;
+    });
+    setCounts(c); setPending(p); setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const myStatus = (roomId) => members.find((m) => m.room_id === roomId)?.status || null;
+
+  const create = async (form) => {
+    if (!uid) return;
+    const { data, error } = await supabase.from("rooms")
+      .insert({ name: form.name, description: form.desc, church: form.church || null, is_private: form.isPrivate, owner_id: uid })
+      .select().single();
+    if (!error && data) {
+      await supabase.from("room_members").insert({ room_id: data.id, user_id: uid, status: "member", role: "owner" });
+      award(10, "새로운 방 개설");
+      setCreating(false); load();
+    }
+  };
+  const join = async (room) => {
+    if (!uid) return;
+    await supabase.from("room_members").insert({
+      room_id: room.id, user_id: uid,
+      status: room.is_private ? "pending" : "member",
+    });
+    if (!room.is_private) award(5, "방 참여");
+    load();
+  };
+  const leave = async (room) => {
+    if (!uid) return;
+    await supabase.from("room_members").delete().eq("room_id", room.id).eq("user_id", uid);
+    load();
+  };
+
+  const shown = tab === "mine" ? rooms.filter((r) => myStatus(r.id)) : rooms;
 
   return (
     <div style={{ padding: "0 16px" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        {[["all", "모든 방"], ["mine", "내 방"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: tab === k ? T.ink : T.card, color: tab === k ? "#fff" : T.muted, border: `1px solid ${tab === k ? T.ink : T.line}` }}>{l}</button>
+        ))}
+      </div>
+
       <button onClick={() => setCreating(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: T.card, border: `1px dashed ${T.gold}`, borderRadius: 14, padding: 13, marginBottom: 14, fontSize: 14.5, fontWeight: 700, color: T.goldDeep }}>
         <Plus size={16} /> 새로운 방 만들기
       </button>
 
-      <div style={{ display: "grid", gap: 11, paddingBottom: 8 }}>
-        {rooms.map((r) => (
-          <button key={r.id} onClick={() => { setOpen(r.id); setRooms((rs) => rs.map((x) => x.id === r.id ? { ...x, unread: 0 } : x)); }} style={{ width: "100%", textAlign: "left", background: T.card, borderRadius: 16, padding: 15, border: `1px solid ${T.line}`, boxShadow: "0 1px 6px rgba(32,42,68,.03)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-              <div style={{ width: 42, height: 42, borderRadius: 12, background: `${T.violet}14`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><DoorOpen size={21} color={T.violet} /></div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <p style={{ margin: 0, fontSize: 16.5, fontWeight: 700, color: T.ink }}>{r.name}</p>
-                  {r.mine && <span style={{ fontSize: 11.5, fontWeight: 700, color: T.sage, background: T.sageSoft, borderRadius: 999, padding: "1px 7px" }}>참여중</span>}
+      {loading ? <p style={{ fontSize: 13.5, color: T.muted, textAlign: "center", padding: 20 }}>불러오는 중…</p>
+        : shown.length === 0 ? <Empty icon={DoorOpen} text={tab === "mine" ? "아직 참여한 방이 없어요.\n관심 있는 방에 들어가 보세요." : "아직 만들어진 방이 없어요.\n첫 방을 만들어보세요."} />
+        : (
+        <div style={{ display: "grid", gap: 11, paddingBottom: 8 }}>
+          {shown.map((r) => {
+            const st = myStatus(r.id);
+            const isOwner = r.owner_id === uid;
+            const n = counts[r.id] || 0;
+            const waiting = isOwner ? (pending[r.id] || 0) : 0;
+            return (
+              <div key={r.id} style={{ background: T.card, borderRadius: 15, border: `1px solid ${T.line}`, padding: 15 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
+                  <span style={{ fontSize: 15.5, fontWeight: 700, color: T.ink }}>{r.name}</span>
+                  {r.is_private
+                    ? <Tag c={T.violet} bg={`${T.violet}18`}><Lock size={9} /> 비공개</Tag>
+                    : <Tag c={T.sage} bg={T.sageSoft}>공개</Tag>}
+                  {isOwner && <Tag c={T.goldDeep} bg={T.goldSoft}>방장</Tag>}
                 </div>
-                <p style={{ margin: "3px 0 0", fontSize: 13.5, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.desc}</p>
+                {r.description && <p style={{ margin: "0 0 8px", fontSize: 13.5, color: T.muted, lineHeight: 1.5 }}>{r.description}</p>}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: T.muted, marginBottom: 11 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Users size={13} /> {n}명</span>
+                  {r.church && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Church size={13} /> {r.church}</span>}
+                  {waiting > 0 && <span style={{ color: T.rose, fontWeight: 700 }}>신청 {waiting}건</span>}
+                </div>
+
+                {isOwner ? (
+                  <RoomManage room={r} onChanged={load} />
+                ) : st === "member" ? (
+                  <button onClick={() => leave(r)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.sageSoft, color: T.sage, border: "none" }}>참여 중 · 나가기</button>
+                ) : st === "pending" ? (
+                  <button onClick={() => leave(r)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.goldSoft, color: T.goldDeep, border: "none" }}>수락 대기 중 · 신청 취소</button>
+                ) : (
+                  <button onClick={() => join(r)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.ink, color: "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    {r.is_private ? <><Lock size={13} /> 참여 신청하기</> : <><DoorOpen size={14} /> 바로 입장하기</>}
+                  </button>
+                )}
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                {r.unread > 0 && <span style={{ minWidth: 18, height: 18, borderRadius: 999, background: T.rose, color: "#fff", fontSize: 11.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{r.unread}</span>}
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 13.5, color: T.muted }}><Users size={13} /> {r.members}</span>
+            );
+          })}
+        </div>
+      )}
+
+      {creating && <NewRoom onClose={() => setCreating(false)} onCreate={create} />}
+    </div>
+  );
+}
+
+/* 방장용 — 신청 수락/거절 */
+function RoomManage({ room, onChanged }) {
+  const [reqs, setReqs] = useState([]);
+  const [open, setOpen] = useState(false);
+
+  const load = async () => {
+    const { data } = await supabase.from("room_members").select("id, user_id, status").eq("room_id", room.id).eq("status", "pending");
+    if (!data?.length) { setReqs([]); return; }
+    const { data: ps } = await supabase.from("profiles").select("id, nickname, church").in("id", data.map((d) => d.user_id));
+    setReqs(data.map((d) => ({ ...d, p: ps?.find((x) => x.id === d.user_id) })));
+  };
+  useEffect(() => { load(); }, [room.id]);
+
+  const accept = async (id) => { await supabase.from("room_members").update({ status: "member" }).eq("id", id); load(); onChanged(); };
+  const reject = async (id) => { await supabase.from("room_members").delete().eq("id", id); load(); onChanged(); };
+
+  if (!reqs.length) return <div style={{ padding: "9px 0", textAlign: "center", fontSize: 12.5, color: T.muted, background: T.goldSoft, borderRadius: 10 }}>내가 만든 방이에요</div>;
+
+  return (
+    <div>
+      <button onClick={() => setOpen((v) => !v)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.rose, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <UserPlus size={14} /> 참여 신청 {reqs.length}건 {open ? "닫기" : "보기"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 9, display: "grid", gap: 7 }}>
+          {reqs.map((r) => (
+            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 9, background: T.paper, borderRadius: 10, padding: "9px 11px", border: `1px solid ${T.line}` }}>
+              <Avatar init={(r.p?.nickname || "?")[0]} c={T.violet} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: T.ink }}>{r.p?.nickname || "이름 없음"}</p>
+                <p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{r.p?.church || "미입력"}</p>
               </div>
+              <button onClick={() => accept(r.id)} style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", background: T.sage, borderRadius: 8, padding: "6px 11px" }}>수락</button>
+              <button onClick={() => reject(r.id)} style={{ fontSize: 12.5, fontWeight: 700, color: T.muted }}>거절</button>
             </div>
-          </button>
-        ))}
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewRoom({ onClose, onCreate }) {
+  const [name, setName] = useState("");
+  const [desc, setDesc] = useState("");
+  const [church, setChurch] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
+  return (
+    <Sheet onClose={onClose} accent={T.violet} title={<><DoorOpen size={16} color={T.violet} /> 새로운 방 만들기</>}>
+      <p style={{ margin: "0 0 14px", fontSize: 14, color: T.muted }}>교회 모임이나 소모임 방을 만들어 지체들을 초대해요.</p>
+      <Field icon={DoorOpen} label="방 이름" placeholder="예 · 은혜교회 청년부 / 우리 구역 새벽기도" value={name} onChange={setName} />
+      <Field icon={PenLine} label="소개 (선택)" placeholder="어떤 모임인지 알려주세요" value={desc} onChange={setDesc} />
+      <Field icon={Church} label="소속 교회 (선택)" placeholder="예 · 은혜교회" value={church} onChange={setChurch} />
+
+      <p style={{ margin: "4px 0 8px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>공개 방식</p>
+      <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+        {[
+          { v: false, ic: DoorOpen, t: "공개 방", d: "누구나 바로 들어올 수 있어요", c: T.sage },
+          { v: true, ic: Lock, t: "비공개 방", d: "참여 신청을 방장이 수락해야 들어와요", c: T.violet },
+        ].map((o) => {
+          const on = isPrivate === o.v; const Ic = o.ic;
+          return (
+            <button key={String(o.v)} onClick={() => setIsPrivate(o.v)} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", padding: "13px 14px", borderRadius: 12, background: on ? `${o.c}0F` : T.card, border: `2px solid ${on ? o.c : T.line}` }}>
+              <Ic size={19} color={on ? o.c : T.muted} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{o.t}</p>
+                <p style={{ margin: "1px 0 0", fontSize: 12, color: T.muted }}>{o.d}</p>
+              </div>
+              {on && <span style={{ width: 20, height: 20, borderRadius: 999, background: o.c, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Check size={12} color="#fff" /></span>}
+            </button>
+          );
+        })}
       </div>
 
-      {creating && <CreateRoomSheet onClose={() => setCreating(false)} onCreate={(name, desc) => { setRooms((rs) => [{ id: "r" + Date.now(), name, desc: desc || "함께 신앙을 나누는 방", members: 1, mine: true, feed: [] }, ...rs]); setCreating(false); }} />}
-    </div>
+      <button onClick={() => onCreate({ name, desc, church, isPrivate })} disabled={!name.trim()}
+        style={{ width: "100%", padding: "13px 0", borderRadius: 11, fontSize: 15, fontWeight: 700, background: name.trim() ? T.ink : T.line, color: name.trim() ? "#fff" : T.muted }}>방 만들기 · +10P</button>
+    </Sheet>
   );
 }
 
@@ -2157,11 +2436,130 @@ function TextArea({ label, placeholder, value, onChange }) {
   );
 }
 
+function RoutineSheet({ onClose }) {
+  const [rows, setRows] = useState([]);
+  const [uid, setUid] = useState(null);
+  const [edit, setEdit] = useState(null);
+  const [perm, setPerm] = useState(typeof Notification !== "undefined" ? Notification.permission : "default");
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+  const load = async (id) => {
+    const { data } = await supabase.from("routines").select("*").eq("user_id", id).order("time");
+    setRows(data || []);
+  };
+  useEffect(() => {
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      const id = u?.user?.id; setUid(id);
+      if (id) load(id);
+    })();
+  }, []);
+
+  const askPerm = async () => {
+    if (typeof Notification === "undefined") return;
+    const p = await Notification.requestPermission();
+    setPerm(p);
+  };
+  const save = async (r) => {
+    const payload = { user_id: uid, title: r.title, dim: r.dim || null, time: r.time, days: r.days, active: true };
+    if (r.id) await supabase.from("routines").update(payload).eq("id", r.id);
+    else await supabase.from("routines").insert(payload);
+    setEdit(null); load(uid);
+  };
+  const del = async (id) => { if (!confirm("이 루틴을 지울까요?")) return; await supabase.from("routines").delete().eq("id", id); load(uid); };
+  const toggle = async (r) => { await supabase.from("routines").update({ active: !r.active }).eq("id", r.id); load(uid); };
+
+  return (
+    <Sheet onClose={onClose} accent={T.violet} title={<><Clock size={16} color={T.violet} /> 나만의 루틴</>}>
+      <p style={{ margin: "0 0 12px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>매일 훈련할 시간을 정하면 그 시간에 알려드려요. 나만의 리듬을 만들어요.</p>
+
+      {perm !== "granted" && (
+        <button onClick={askPerm} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, background: T.goldSoft, border: `1px solid ${T.gold}`, borderRadius: 11, padding: "11px 13px", marginBottom: 13, textAlign: "left" }}>
+          <Bell size={17} color={T.goldDeep} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, fontSize: 13, color: T.ink, lineHeight: 1.5 }}><b>알림을 켜주세요</b><br /><span style={{ fontSize: 11.5, color: T.muted }}>눌러서 알림을 허용하면 루틴 시간에 알려드려요</span></span>
+        </button>
+      )}
+
+      <button onClick={() => setEdit({ title: "", dim: "", time: "06:00", days: [0,1,2,3,4,5,6] })}
+        style={{ width: "100%", padding: "12px 0", borderRadius: 11, background: T.violet, color: "#fff", fontSize: 14, fontWeight: 700, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <Plus size={16} /> 루틴 추가
+      </button>
+
+      {rows.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: "16px 0" }}>아직 루틴이 없어요.<br />추가해서 나만의 리듬을 만들어보세요.</p>}
+      {rows.map((r) => (
+        <div key={r.id} style={{ background: T.card, borderRadius: 12, border: `1px solid ${T.line}`, padding: 13, marginBottom: 9, opacity: r.active ? 1 : .5 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ fontFamily: serif, fontSize: 21, fontWeight: 700, color: T.ink }}>{r.time}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink }}>{r.title}</p>
+              <p style={{ margin: "1px 0 0", fontSize: 11.5, color: T.muted }}>
+                {r.dim && DIM[r.dim] ? `${DIM[r.dim].label} · ` : ""}
+                {(r.days || []).length === 7 ? "매일" : (r.days || []).map((d) => DAYS[d]).join("·")}
+              </p>
+            </div>
+            <button onClick={() => toggle(r)} style={{ width: 40, height: 23, borderRadius: 999, background: r.active ? T.sage : T.line, position: "relative", flexShrink: 0 }}>
+              <span style={{ position: "absolute", top: 2, left: r.active ? 20 : 2, width: 19, height: 19, borderRadius: 999, background: "#fff", transition: "left .2s" }} />
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 9, marginTop: 9 }}>
+            <button onClick={() => setEdit(r)} style={{ fontSize: 12.5, color: T.gold, fontWeight: 700 }}>수정</button>
+            <button onClick={() => del(r.id)} style={{ fontSize: 12.5, color: T.rose, fontWeight: 700 }}>삭제</button>
+          </div>
+        </div>
+      ))}
+
+      {edit && <RoutineForm row={edit} onCancel={() => setEdit(null)} onSave={save} />}
+    </Sheet>
+  );
+}
+
+function RoutineForm({ row, onCancel, onSave }) {
+  const [f, setF] = useState(row);
+  const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  const toggleDay = (d) => set("days", f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d].sort());
+  return (
+    <Sheet onClose={onCancel} accent={T.violet} title={row.id ? "루틴 수정" : "루틴 추가"}>
+      <Field icon={Feather} label="루틴 이름" placeholder="예 · 새벽 QT" value={f.title} onChange={(v) => set("title", v)} />
+      <div style={{ marginBottom: 13 }}>
+        <p style={{ margin: "0 0 7px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>시간</p>
+        <input type="time" value={f.time} onChange={(e) => set("time", e.target.value)}
+          style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 11, padding: "12px 13px", fontSize: 16, color: T.ink, background: T.card, outline: "none", fontFamily: "inherit" }} />
+      </div>
+      <div style={{ marginBottom: 13 }}>
+        <p style={{ margin: "0 0 7px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>요일</p>
+        <div style={{ display: "flex", gap: 5 }}>
+          {DAYS.map((d, i) => {
+            const on = f.days.includes(i);
+            return (
+              <button key={i} onClick={() => toggleDay(i)} style={{ flex: 1, padding: "9px 0", borderRadius: 9, fontSize: 13, fontWeight: 700, background: on ? T.violet : T.card, color: on ? "#fff" : T.muted, border: `1px solid ${on ? T.violet : T.line}` }}>{d}</button>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <p style={{ margin: "0 0 7px", fontSize: 13.5, fontWeight: 700, color: T.ink }}>연결할 훈련 (선택)</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {DIMS.map((d) => {
+            const on = f.dim === d.key;
+            return (
+              <button key={d.key} onClick={() => set("dim", on ? "" : d.key)} style={{ fontSize: 12, fontWeight: 700, padding: "6px 11px", borderRadius: 999, background: on ? d.c : T.card, color: on ? "#fff" : T.muted, border: `1px solid ${on ? d.c : T.line}` }}>{d.label}</button>
+            );
+          })}
+        </div>
+      </div>
+      <button onClick={() => onSave(f)} disabled={!f.title || !f.days.length}
+        style={{ width: "100%", padding: "13px 0", borderRadius: 11, fontSize: 15, fontWeight: 700, background: (f.title && f.days.length) ? T.ink : T.line, color: (f.title && f.days.length) ? "#fff" : T.muted }}>저장</button>
+    </Sheet>
+  );
+}
+
 function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
   const st = stageInfo(faithDays).current;
   const [invite, setInvite] = useState(false);
   const [safety, setSafety] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
+  const [routineOpen, setRoutineOpen] = useState(false);
   const kakao = user.method === "kakao";
   return (
     <div>
@@ -2196,6 +2594,14 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
             <ChevronRight size={18} color={T.gold} />
           </button>
         )}
+        <button onClick={() => setRoutineOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: `${T.violet}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Clock size={20} color={T.violet} /></div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>나만의 루틴 · 알림</p>
+            <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted }}>내 시간에 맞춰 알려드려요</p>
+          </div>
+          <ChevronRight size={18} color={T.muted} />
+        </button>
         <button onClick={() => setPwOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: T.goldSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Lock size={20} color={T.goldDeep} /></div>
           <div style={{ flex: 1 }}>
@@ -2214,6 +2620,7 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
         </button>
         <button onClick={onOut} style={{ width: "100%", padding: "12px 0", borderRadius: 11, fontSize: 14.5, fontWeight: 700, color: T.rose, background: T.card, border: `1px solid ${T.line}` }}>로그아웃</button>
       </div>
+      {routineOpen && <RoutineSheet onClose={() => setRoutineOpen(false)} />}
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
       {safety && <SafetySheet onClose={() => setSafety(false)} />}
       {pwOpen && (
