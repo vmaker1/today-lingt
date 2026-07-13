@@ -927,6 +927,24 @@ function renderContent(key, { openWeb, byCat }) {
   return null;
 }
 
+/* 목소리 이름을 사람이 읽기 좋게 다듬기 */
+function voiceLabel(v) {
+  const raw = v.name || "";
+  let n = raw
+    .replace(/^Microsoft\s+/i, "")
+    .replace(/^Google\s+/i, "")
+    .replace(/Online\s*\(Natural\)/i, "")
+    .replace(/\(Natural\)/i, "")
+    .replace(/-\s*Korean.*$/i, "")
+    .replace(/-\s*English.*$/i, "")
+    .replace(/한국의|대한민국/g, "")
+    .trim();
+  const natural = /natural|neural|premium|enhanced|고품질/i.test(raw);
+  const male = /injoon|인준|male|남/i.test(raw);
+  const female = /sunhi|heami|yuna|female|여/i.test(raw);
+  return (n || "기본") + (male ? " · 남" : female ? " · 여" : "") + (natural ? " ✨" : "");
+}
+
 /* 말씀 — 성경 찾기 */
 function BibleFinder({ openWeb }) {
   const [testament, setTestament] = useState("nt");
@@ -939,6 +957,8 @@ function BibleFinder({ openWeb }) {
   const [ver, setVer] = useState("ko");   // ko | asv | kjv
   const [speaking, setSpeaking] = useState(false);
   const [rate, setRate] = useState(1);      // 읽기 속도
+  const [voices, setVoices] = useState([]); // 이 기기에서 쓸 수 있는 목소리들
+  const [voiceURI, setVoiceURI] = useState("");
   const [readSet, setReadSet] = useState(new Set()); // 읽은 장 "책번호:장"
   const [uid, setUid] = useState(null);
   const books = testament === "ot" ? BIBLE_OT : BIBLE_NT;
@@ -960,6 +980,47 @@ function BibleFinder({ openWeb }) {
     return () => { if (typeof window !== "undefined") window.speechSynthesis?.cancel(); };
   }, []);
 
+  // 기기에 깔린 목소리 불러오기 (비동기로 로드돼서 이벤트도 같이 걸어둠)
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const score = (v) => {
+      const n = (v.name || "").toLowerCase();
+      let s = 0;
+      if (/natural|neural/.test(n)) s += 6;      // 엣지 뉴럴 = 가장 자연스러움
+      if (/premium|enhanced|고품질/.test(n)) s += 4;
+      if (/online/.test(n)) s += 3;
+      if (/google/.test(n)) s += 2;
+      return s;
+    };
+    const load = () => {
+      const want = ver === "ko" ? "ko" : "en";
+      const list = (window.speechSynthesis.getVoices() || [])
+        .filter((v) => (v.lang || "").toLowerCase().startsWith(want))
+        .sort((a, b) => score(b) - score(a));
+      setVoices(list);
+      setVoiceURI((cur) => {
+        if (list.some((v) => v.voiceURI === cur)) return cur;
+        let saved = "";
+        try { saved = localStorage.getItem("tl_voice_" + want) || ""; } catch {}
+        if (list.some((v) => v.voiceURI === saved)) return saved;
+        return list[0]?.voiceURI || "";
+      });
+    };
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, [ver]);
+
+  // 크롬이 긴 낭독 중간에 멈추는 버그 방지
+  useEffect(() => {
+    if (!speaking) return;
+    const t = setInterval(() => {
+      const s = typeof window !== "undefined" ? window.speechSynthesis : null;
+      if (s && s.speaking && !s.paused) { s.pause(); s.resume(); }
+    }, 8000);
+    return () => clearInterval(t);
+  }, [speaking]);
+
   const markRead = async (name, ch) => {
     const no = bookNo(name);
     const key = `${no}:${ch}`;
@@ -972,13 +1033,25 @@ function BibleFinder({ openWeb }) {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     const synth = window.speechSynthesis;
     if (speaking) { synth.cancel(); setSpeaking(false); return; }
-    const text = list.map((v) => `${v.verse}절. ${v[ver] || ""}`).join(" ");
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = ver === "ko" ? "ko-KR" : "en-US";
-    u.rate = rate;
-    u.onend = () => { setSpeaking(false); markRead(name, ch); };  // 다 읽으면 자동 체크
-    u.onerror = () => setSpeaking(false);
-    synth.cancel(); synth.speak(u); setSpeaking(true);
+
+    // ★ 절 번호는 읽지 않음. 절마다 끊어 읽어서 숨 쉬듯 자연스럽게
+    const lines = list.map((v) => (v[ver] || "").trim()).filter(Boolean);
+    if (!lines.length) return;
+
+    const picked = voices.find((v) => v.voiceURI === voiceURI) || null;
+    synth.cancel();
+    lines.forEach((line, i) => {
+      const u = new SpeechSynthesisUtterance(line);
+      u.lang = ver === "ko" ? "ko-KR" : "en-US";
+      if (picked) u.voice = picked;
+      u.rate = rate * 0.95;   // 살짝 느리게 = 더 부드럽게
+      u.pitch = 0.95;         // 톤을 살짝 낮춰 차분하게
+      u.volume = 1;
+      if (i === lines.length - 1) u.onend = () => { setSpeaking(false); markRead(name, ch); }; // 다 읽으면 자동 체크
+      u.onerror = () => setSpeaking(false);
+      synth.speak(u);
+    });
+    setSpeaking(true);
   };
   const VERS = [{ k: "ko", l: "개역한글" }, { k: "asv", l: "ASV" }, { k: "kjv", l: "KJV" }];
 
@@ -1030,6 +1103,28 @@ function BibleFinder({ openWeb }) {
             ))}
           </div>
         </div>
+
+        {/* 목소리 고르기 — ✨ 표시가 더 자연스러운 목소리예요 */}
+        {voices.length > 1 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, overflowX: "auto", marginBottom: 11, paddingBottom: 2 }}>
+            <span style={{ flexShrink: 0, fontSize: 11, color: T.muted, fontWeight: 700, marginRight: 2 }}>목소리</span>
+            {voices.slice(0, 6).map((v) => (
+              <button key={v.voiceURI}
+                onClick={() => {
+                  setVoiceURI(v.voiceURI);
+                  try { localStorage.setItem("tl_voice_" + (ver === "ko" ? "ko" : "en"), v.voiceURI); } catch {}
+                  if (speaking) { window.speechSynthesis.cancel(); setSpeaking(false); }
+                }}
+                style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, padding: "5px 10px", borderRadius: 999, whiteSpace: "nowrap",
+                  background: voiceURI === v.voiceURI ? T.violet : T.card,
+                  color: voiceURI === v.voiceURI ? "#fff" : T.muted,
+                  border: `1px solid ${voiceURI === v.voiceURI ? T.violet : T.line}` }}>
+                {voiceLabel(v)}
+              </button>
+            ))}
+          </div>
+        )}
+
         {loading ? <p style={{ fontSize: 14, color: T.muted, textAlign: "center", padding: 24 }}>불러오는 중…</p> : verses.length === 0 ? (
           <p style={{ fontSize: 13.5, color: T.muted, textAlign: "center", padding: 24, lineHeight: 1.6 }}>본문을 불러오지 못했어요.<br />성경 데이터가 등록되었는지 확인해 주세요.</p>
         ) : (
