@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabase.js";
 import {
   Sunrise, BookOpen, Feather, HeartHandshake, Music, Church, Footprints,
@@ -959,6 +959,10 @@ function BibleFinder({ openWeb }) {
   const [rate, setRate] = useState(1);      // 읽기 속도
   const [voices, setVoices] = useState([]); // 이 기기에서 쓸 수 있는 목소리들
   const [voiceURI, setVoiceURI] = useState("");
+  const stopRef = useRef(false);            // 사용자가 직접 멈췄는지 표시
+  const [curIdx, setCurIdx] = useState(-1); // 지금 읽고 있는 절 (index)
+  const [savedIdx, setSavedIdx] = useState(0); // 멈춘 지점 (이어 듣기용)
+  const verseRefs = useRef({});
   const [readSet, setReadSet] = useState(new Set()); // 읽은 장 "책번호:장"
   const [uid, setUid] = useState(null);
   const books = testament === "ot" ? BIBLE_OT : BIBLE_NT;
@@ -1029,35 +1033,89 @@ function BibleFinder({ openWeb }) {
     await supabase.from("bible_progress").insert({ user_id: uid, book_no: no, chapter: ch });
   };
 
-  const speak = (list, name, ch) => {
+  // 읽기표에서 취소 (DB에서도 삭제)
+  const unmarkRead = async (name, ch) => {
+    const no = bookNo(name);
+    const key = `${no}:${ch}`;
+    if (!uid || !readSet.has(key)) return;
+    setReadSet((s) => { const n = new Set(s); n.delete(key); return n; });
+    await supabase.from("bible_progress").delete()
+      .eq("user_id", uid).eq("book_no", no).eq("chapter", ch);
+  };
+
+  // 멈춘 지점 기억하기 (이 기기에만 저장)
+  const posKey = (name, ch) => `tl_pos_${bookNo(name)}:${ch}`;
+  const savePos = (name, ch, idx) => {
+    try { localStorage.setItem(posKey(name, ch), String(idx)); } catch {}
+    setSavedIdx(idx);
+  };
+  const clearPos = (name, ch) => {
+    try { localStorage.removeItem(posKey(name, ch)); } catch {}
+    setSavedIdx(0);
+  };
+
+  // 지금 읽는 절이 화면 밖이면 따라 내려가기
+  useEffect(() => {
+    if (curIdx < 0) return;
+    const el = verseRefs.current[curIdx];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [curIdx]);
+
+  const stopSpeak = () => {
+    stopRef.current = true;
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    setSpeaking(false);
+    setCurIdx(-1);
+  };
+
+  // startIdx 절부터 읽기 시작 (0 = 처음부터)
+  const startSpeak = (list, name, ch, startIdx = 0) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     const synth = window.speechSynthesis;
-    if (speaking) { synth.cancel(); setSpeaking(false); return; }
 
     // ★ 절 번호는 읽지 않음. 절마다 끊어 읽어서 숨 쉬듯 자연스럽게
-    const lines = list.map((v) => (v[ver] || "").trim()).filter(Boolean);
-    if (!lines.length) return;
+    const items = list
+      .map((v, i) => ({ i, text: (v[ver] || "").trim() }))
+      .filter((x) => x.text && x.i >= Math.max(0, Math.min(startIdx, list.length - 1)));
+    if (!items.length) return;
 
     const picked = voices.find((v) => v.voiceURI === voiceURI) || null;
+    stopRef.current = true;
     synth.cancel();
-    lines.forEach((line, i) => {
-      const u = new SpeechSynthesisUtterance(line);
-      u.lang = ver === "ko" ? "ko-KR" : "en-US";
-      if (picked) u.voice = picked;
-      u.rate = rate * 0.95;   // 살짝 느리게 = 더 부드럽게
-      u.pitch = 0.95;         // 톤을 살짝 낮춰 차분하게
-      u.volume = 1;
-      if (i === lines.length - 1) u.onend = () => { setSpeaking(false); markRead(name, ch); }; // 다 읽으면 자동 체크
-      u.onerror = () => setSpeaking(false);
-      synth.speak(u);
-    });
-    setSpeaking(true);
+    setCurIdx(-1);
+
+    // cancel 직후 바로 speak하면 크롬에서 씹히는 경우가 있어 살짝 텀을 둠
+    setTimeout(() => {
+      stopRef.current = false;
+      items.forEach((item, k) => {
+        const u = new SpeechSynthesisUtterance(item.text);
+        u.lang = ver === "ko" ? "ko-KR" : "en-US";
+        if (picked) u.voice = picked;
+        u.rate = rate * 0.95;   // 살짝 느리게 = 더 부드럽게
+        u.pitch = 0.95;         // 톤을 살짝 낮춰 차분하게
+        u.volume = 1;
+        u.onstart = () => { setCurIdx(item.i); savePos(name, ch, item.i); };
+        // ★ 끝까지 다 들었을 때만 읽기표에 체크 (중간에 멈추면 체크 안 함)
+        if (k === items.length - 1) u.onend = () => {
+          setSpeaking(false);
+          setCurIdx(-1);
+          if (!stopRef.current) { clearPos(name, ch); markRead(name, ch); }
+        };
+        u.onerror = () => { setSpeaking(false); setCurIdx(-1); };
+        synth.speak(u);
+      });
+      setSpeaking(true);
+    }, 120);
   };
+
   const VERS = [{ k: "ko", l: "개역한글" }, { k: "asv", l: "ASV" }, { k: "kjv", l: "KJV" }];
 
   const openChapter = async (name, ch) => {
-    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
-    setSpeaking(false);
+    stopSpeak();
+    verseRefs.current = {};
+    let pos = 0;
+    try { pos = parseInt(localStorage.getItem(posKey(name, ch)) || "0", 10) || 0; } catch {}
+    setSavedIdx(pos);
     setChapter(ch); setLoading(true); setVerses([]);
     const { data } = await supabase.from("bible").select("verse, ko, asv, kjv")
       .eq("book", name).eq("chapter", ch).order("verse");
@@ -1083,25 +1141,66 @@ function BibleFinder({ openWeb }) {
             <button key={v.k} onClick={() => setVer(v.k)} style={{ fontSize: 12, fontWeight: 700, padding: "5px 11px", borderRadius: 999, background: ver === v.k ? T.ink : T.card, color: ver === v.k ? "#fff" : T.muted, border: `1px solid ${ver === v.k ? T.ink : T.line}` }}>{v.l}</button>
           ))}
           {readSet.has(`${bookNo(book[0])}:${chapter}`) && (
-            <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, color: T.sage, background: T.sageSoft, borderRadius: 999, padding: "3px 9px" }}><Check size={11} /> 읽음</span>
+            <button onClick={() => unmarkRead(book[0], chapter)}
+              style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, color: T.sage, background: T.sageSoft, borderRadius: 999, padding: "3px 9px", border: `1px solid ${T.sage}33` }}>
+              <Check size={11} /> 읽음 <X size={10} />
+            </button>
           )}
         </div>
 
         {/* 음성으로 듣기 */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "9px 11px", marginBottom: 11 }}>
-          <button onClick={() => speak(verses, book[0], chapter)} disabled={!verses.length}
-            style={{ width: 34, height: 34, borderRadius: 999, flexShrink: 0, background: speaking ? T.rose : T.ink, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {speaking ? <X size={16} color="#fff" /> : <Play size={15} color="#fff" fill="#fff" />}
-          </button>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: T.ink }}>{speaking ? "읽는 중… (누르면 정지)" : "성경 읽어주기"}</p>
-            <p style={{ margin: "1px 0 0", fontSize: 11, color: T.muted }}>다 들으면 읽기표에 자동 체크돼요</p>
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "9px 11px", marginBottom: 11 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => (speaking ? stopSpeak() : startSpeak(verses, book[0], chapter, savedIdx))} disabled={!verses.length}
+              style={{ width: 34, height: 34, borderRadius: 999, flexShrink: 0, background: speaking ? T.rose : T.ink, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {speaking ? <X size={16} color="#fff" /> : <Play size={15} color="#fff" fill="#fff" />}
+            </button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: T.ink }}>
+                {speaking ? `읽는 중… ${verses[curIdx]?.verse ?? ""}${curIdx >= 0 ? "절" : ""} (누르면 정지)`
+                  : savedIdx > 0 ? `이어 듣기 · ${verses[savedIdx]?.verse ?? savedIdx + 1}절부터`
+                  : "성경 읽어주기"}
+              </p>
+              <p style={{ margin: "1px 0 0", fontSize: 11, color: T.muted }}>
+                {savedIdx > 0 && !speaking ? "멈춘 자리부터 이어서 읽어드려요" : "다 들으면 읽기표에 자동 체크돼요"}
+              </p>
+            </div>
+            {savedIdx > 0 && !speaking && (
+              <button onClick={() => startSpeak(verses, book[0], chapter, 0)}
+                style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, padding: "5px 8px", borderRadius: 7, color: T.muted, border: `1px solid ${T.line}`, background: "transparent" }}>처음부터</button>
+            )}
+            <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+              {[0.75, 1, 1.25, 1.5].map((r) => (
+                <button key={r} onClick={() => setRate(r)} style={{ fontSize: 11, fontWeight: 700, padding: "4px 7px", borderRadius: 7, background: rate === r ? T.gold : "transparent", color: rate === r ? "#fff" : T.muted, border: `1px solid ${rate === r ? T.gold : T.line}` }}>{r}x</button>
+              ))}
+            </div>
           </div>
-          <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-            {[0.75, 1, 1.25, 1.5].map((r) => (
-              <button key={r} onClick={() => setRate(r)} style={{ fontSize: 11, fontWeight: 700, padding: "4px 7px", borderRadius: 7, background: rate === r ? T.gold : "transparent", color: rate === r ? "#fff" : T.muted, border: `1px solid ${rate === r ? T.gold : T.line}` }}>{r}x</button>
-            ))}
-          </div>
+
+          {/* 진행바 — 누르면 그 절로 이동 */}
+          {verses.length > 0 && (() => {
+            const at = curIdx >= 0 ? curIdx : savedIdx;
+            const pct = ((at + (speaking ? 1 : 0)) / verses.length) * 100;
+            return (
+              <div style={{ marginTop: 9 }}>
+                <div
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const p = Math.min(0.999, Math.max(0, (e.clientX - r.left) / r.width));
+                    startSpeak(verses, book[0], chapter, Math.floor(p * verses.length));
+                  }}
+                  style={{ padding: "6px 0", cursor: "pointer" }}>
+                  <div style={{ position: "relative", width: "100%", height: 6, borderRadius: 999, background: T.line }}>
+                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${Math.max(0, Math.min(100, pct))}%`, borderRadius: 999, background: T.gold, transition: "width .3s" }} />
+                    <div style={{ position: "absolute", top: -3, left: `calc(${Math.max(0, Math.min(100, pct))}% - 6px)`, width: 12, height: 12, borderRadius: 999, background: "#fff", border: `2px solid ${T.gold}`, transition: "left .3s" }} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: T.muted }}>
+                  <span style={{ fontWeight: 700 }}>{verses[at]?.verse ?? 1}절</span>
+                  <span>총 {verses.length}절 · 바나 본문을 눌러 이동</span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* 목소리 고르기 — ✨ 표시가 더 자연스러운 목소리예요 */}
@@ -1113,7 +1212,7 @@ function BibleFinder({ openWeb }) {
                 onClick={() => {
                   setVoiceURI(v.voiceURI);
                   try { localStorage.setItem("tl_voice_" + (ver === "ko" ? "ko" : "en"), v.voiceURI); } catch {}
-                  if (speaking) { window.speechSynthesis.cancel(); setSpeaking(false); }
+                  if (speaking) { stopRef.current = true; window.speechSynthesis.cancel(); setSpeaking(false); }
                 }}
                 style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, padding: "5px 10px", borderRadius: 999, whiteSpace: "nowrap",
                   background: voiceURI === v.voiceURI ? T.violet : T.card,
@@ -1129,8 +1228,13 @@ function BibleFinder({ openWeb }) {
           <p style={{ fontSize: 13.5, color: T.muted, textAlign: "center", padding: 24, lineHeight: 1.6 }}>본문을 불러오지 못했어요.<br />성경 데이터가 등록되었는지 확인해 주세요.</p>
         ) : (
           <div style={{ maxHeight: 320, overflowY: "auto", background: T.card, borderRadius: 12, border: `1px solid ${T.line}`, padding: "14px 15px" }}>
-            {verses.map((v) => (
-              <p key={v.verse} style={{ margin: "0 0 9px", fontSize: ver === "ko" ? 15 : 14, lineHeight: 1.75, color: T.inkSoft, fontFamily: serif }}>
+            {verses.map((v, i) => (
+              <p key={v.verse}
+                ref={(el) => { verseRefs.current[i] = el; }}
+                onClick={() => startSpeak(verses, book[0], chapter, i)}
+                style={{ margin: "0 -7px 4px", padding: "5px 7px", borderRadius: 8, cursor: "pointer",
+                  background: curIdx === i ? `${T.gold}22` : "transparent",
+                  fontSize: ver === "ko" ? 15 : 14, lineHeight: 1.75, color: T.inkSoft, fontFamily: serif, transition: "background .2s" }}>
                 <span style={{ fontSize: 11.5, fontWeight: 700, color: T.gold, marginRight: 5, verticalAlign: "super" }}>{v.verse}</span>
                 {v[ver] || <span style={{ color: T.muted, fontSize: 13 }}>(본문 없음)</span>}
               </p>
@@ -1141,11 +1245,16 @@ function BibleFinder({ openWeb }) {
           {chapter > 1 && <button onClick={() => openChapter(book[0], chapter - 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 13.5, fontWeight: 700, color: T.inkSoft }}>← {chapter - 1}장</button>}
           {chapter < book[1] && <button onClick={() => openChapter(book[0], chapter + 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 9, background: T.card, border: `1px solid ${T.line}`, fontSize: 13.5, fontWeight: 700, color: T.inkSoft }}>{chapter + 1}장 →</button>}
         </div>
-        <button onClick={() => markRead(book[0], chapter)} disabled={readSet.has(`${bookNo(book[0])}:${chapter}`)}
-          style={{ width: "100%", padding: "11px 0", marginTop: 8, borderRadius: 10, fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            background: readSet.has(`${bookNo(book[0])}:${chapter}`) ? T.sageSoft : T.card, color: readSet.has(`${bookNo(book[0])}:${chapter}`) ? T.sage : T.inkSoft, border: `1px solid ${T.line}` }}>
-          <Check size={14} /> {readSet.has(`${bookNo(book[0])}:${chapter}`) ? "읽기표에 기록됨" : "이 장 읽음으로 표시"}
-        </button>
+        {(() => {
+          const isRead = readSet.has(`${bookNo(book[0])}:${chapter}`);
+          return (
+            <button onClick={() => (isRead ? unmarkRead(book[0], chapter) : markRead(book[0], chapter))}
+              style={{ width: "100%", padding: "11px 0", marginTop: 8, borderRadius: 10, fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                background: isRead ? T.sageSoft : T.card, color: isRead ? T.sage : T.inkSoft, border: `1px solid ${isRead ? T.sage : T.line}` }}>
+              {isRead ? <><Check size={14} /> 읽기표에 기록됨 · 누르면 취소</> : <><Check size={14} /> 이 장 읽음으로 표시</>}
+            </button>
+          );
+        })()}
         <p style={{ margin: "9px 2px 0", fontSize: 11, color: T.muted, textAlign: "center" }}>개역한글(1961) · ASV(1901) · KJV(1611) — 모두 공개 도메인</p>
       </div>
     );
