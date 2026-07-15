@@ -1292,13 +1292,14 @@ function BibleFinder({ openWeb }) {
       en: { male: "en-US-Neural2-J", female: "en-US-Neural2-H" },
     };
     const pickedVoice = VOICE_MAP[langParam]?.[gender] || undefined;
-    const speedRate = ver === "ko" ? rate * 0.96 : rate;
+    // 캐싱 효율을 위해 구글에는 항상 1배속으로 요청하고, 속도는 재생 시 조절
+    const playSpeed = ver === "ko" ? rate * 0.96 : rate;
 
     // 한 절의 음성(mp3 base64)을 받아옴 (다음 절 미리 받아두기용으로도 씀)
     const fetchVerse = async (idx) => {
       try {
         const { data, error } = await supabase.functions.invoke("tts", {
-          body: { text: items[idx].text, lang: langParam, voice: pickedVoice, rate: speedRate },
+          body: { text: items[idx].text, lang: langParam, voice: pickedVoice },
         });
         if (error || data?.error) throw new Error(data?.error || "tts");
         return data?.audioContent || null;
@@ -1324,6 +1325,7 @@ function BibleFinder({ openWeb }) {
       nextPromise = (idx + 1 < items.length) ? fetchVerse(idx + 1) : Promise.resolve(null);
 
       const audio = new Audio("data:audio/mp3;base64," + b64);
+      audio.playbackRate = playSpeed;   // 속도는 재생 단에서 조절 (캐시는 1배속 공용)
       audioRef.current = audio;
       setTtsLoading(false);
       setCurIdx(items[idx].i); savePos(name, ch, items[idx].i);
