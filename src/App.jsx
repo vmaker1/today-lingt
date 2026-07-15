@@ -442,9 +442,11 @@ export default function App() {
     kakaoName: session.user.user_metadata?.name || session.user.user_metadata?.full_name || "",
     church: session.user.user_metadata?.church || "미입력",
     method: session.user.app_metadata?.provider === "kakao" ? "kakao" : "email",
+    // 우리 앱에서 닉네임을 직접 정했는지 (커뮤니티 규칙 동의 후 저장됨)
+    hasNickname: !!session.user.user_metadata?.nickname,
   } : null;
-  // 닉네임을 아직 우리 앱에서 정하지 않았으면(=커뮤니티 규칙 동의 전) 프로필 설정을 거치게 함
-  const profileComplete = !!(user && session.user.user_metadata?.nickname);
+  // 로그인 안 했으면 null 참조로 터지지 않게 user에서만 판단
+  const profileComplete = !!(user && user.hasNickname);
   const signOut = () => supabase.auth.signOut();
 
   // 관리자 여부 + DB 콘텐츠
@@ -493,6 +495,13 @@ export default function App() {
     if (!session) { setLoaded(false); return; }
     const uid = session.user.id;
     (async () => {
+      // 탈퇴(비활성화)한 계정이면 바로 로그아웃
+      const { data: flag } = await supabase.from("profiles").select("is_deleted").eq("id", uid).maybeSingle();
+      if (flag?.is_deleted) {
+        alert("탈퇴 처리된 계정이에요. 다시 이용하시려면 문의해 주세요.");
+        await supabase.auth.signOut();
+        return;
+      }
       // 프로필 (포인트 · 성실한 날 · 목표 · 열매)
       const { data: p } = await supabase.from("profiles")
         .select("points, faith_days, daily_goal, mem_streak, earned_fruits, growing_fruit, grow_step")
@@ -652,7 +661,13 @@ export default function App() {
 
       <div style={{ width: "100%", maxWidth: 400, minHeight: "100vh", background: T.paper, position: "relative", boxShadow: "0 0 60px rgba(32,42,68,.15)", display: "flex", flexDirection: "column" }}>
         <div style={{ flex: 1, overflowY: "auto", paddingBottom: 84 }}>
-          {!profileComplete ? <ProfileSetup user={user} /> : (
+          {!authReady ? (
+            <div style={{ padding: 80, textAlign: "center", color: T.muted, fontSize: 14 }}>불러오는 중…</div>
+          ) : !session ? (
+            <SignIn />
+          ) : !profileComplete ? (
+            <ProfileSetup user={user} />
+          ) : (
             <>
               {tab === "home" && <Home {...ctx} />}
               {tab === "journal" && <Journal {...ctx} />}
@@ -672,7 +687,7 @@ export default function App() {
           </div>
         )}
 
-        <TabBar tab={tab} setTab={setTab} />
+        {session && profileComplete && <TabBar tab={tab} setTab={setTab} />}
       </div>
     </div>
   );
@@ -3105,6 +3120,70 @@ const INQ_KINDS = [
   { k: "etc", label: "기타" },
 ];
 
+/* 회원 탈퇴 — 계정 비활성화 (정보 가림 · 완전삭제는 하지 않음) */
+function LeaveSheet({ user, onClose }) {
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const ok = confirmText.trim() === "탈퇴";
+
+  const leave = async () => {
+    if (!ok || busy) return;
+    setBusy(true); setErr("");
+    try {
+      // 완전 삭제 대신: 탈퇴 표시 + 개인정보 가림
+      // 다른 사람에겐 "(탈퇴한 사용자)"로 보이고, 본인 데이터는 보존됨
+      const { error } = await supabase.from("profiles").update({
+        is_deleted: true,
+        deleted_at: new Date().toISOString(),
+        nickname: "(탈퇴한 사용자)",
+        church: null,
+        email: null,
+      }).eq("id", user.id);
+      if (error) throw error;
+
+      // 로그인 계정 정보에서도 닉네임을 비워, 다음에 로그인해도 탈퇴 상태로 인식
+      try { await supabase.auth.updateUser({ data: { nickname: null, deleted: true } }); } catch (_) {}
+
+      await supabase.auth.signOut();
+      if (typeof window !== "undefined") window.location.reload();
+    } catch (e) {
+      setErr("탈퇴 처리 중 문제가 생겼어요. 잠시 후 다시 시도하거나 문의해 주세요.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet onClose={onClose} accent={T.rose} title={<><X size={16} color={T.rose} /> 회원 탈퇴</>}>
+      <p style={{ margin: "0 0 14px", fontSize: 14, color: T.inkSoft, lineHeight: 1.7 }}>
+        탈퇴하면 <b>{user?.name || "회원"}</b>님의 프로필과 개인정보가 <b>더 이상 보이지 않게</b> 돼요.
+        다른 지체들에게는 <b>‘(탈퇴한 사용자)’</b>로 표시돼요.
+      </p>
+
+      <div style={{ background: `${T.gold}0E`, border: `1px solid ${T.gold}33`, borderRadius: 11, padding: "11px 13px", marginBottom: 16 }}>
+        <p style={{ margin: 0, fontSize: 12.5, color: T.inkSoft, lineHeight: 1.6 }}>
+          그동안 남긴 나눔은 공동체의 흐름을 위해 익명으로 남을 수 있어요.
+          완전한 삭제가 필요하시면 <b>문의·제휴</b>로 알려주시면 관리자가 처리해 드려요. 🌱
+        </p>
+      </div>
+
+      <p style={{ margin: "0 0 7px", fontSize: 13, fontWeight: 700, color: T.ink }}>확인을 위해 <span style={{ color: T.rose }}>탈퇴</span>라고 입력해 주세요</p>
+      <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="탈퇴"
+        style={{ width: "100%", boxSizing: "border-box", background: T.card, border: `1px solid ${ok ? T.rose : T.line}`, borderRadius: 11, padding: "13px", fontSize: 15, color: T.ink, outline: "none", marginBottom: 14 }} />
+
+      {err && <p style={{ margin: "0 0 12px", fontSize: 12.5, color: T.rose }}>{err}</p>}
+
+      <button onClick={leave} disabled={!ok || busy}
+        style={{ width: "100%", padding: "14px 0", borderRadius: 11, fontSize: 15, fontWeight: 700, background: ok && !busy ? T.rose : T.line, color: ok && !busy ? "#fff" : T.muted }}>
+        {busy ? "처리 중…" : "탈퇴하기"}
+      </button>
+      <button onClick={onClose} style={{ width: "100%", padding: "12px 0", marginTop: 9, borderRadius: 11, fontSize: 14.5, fontWeight: 700, background: T.card, color: T.inkSoft, border: `1px solid ${T.line}` }}>
+        돌아가기
+      </button>
+    </Sheet>
+  );
+}
+
 function InquirySheet({ user, onClose }) {
   const [kind, setKind] = useState("church");
   const [name, setName] = useState(user?.name || "");
@@ -3266,7 +3345,7 @@ function AdminMembers() {
 
   const load = async () => {
     const { data, error } = await supabase.from("profiles")
-      .select("id, nickname, church, email, points, faith_days, is_admin, is_blocked, created_at")
+      .select("id, nickname, church, email, points, faith_days, is_admin, is_blocked, is_deleted, created_at")
       .order("created_at", { ascending: false });
     if (error) { setErr(error.message); setRows([]); return; }
     setErr(""); setRows(data || []);
@@ -3341,6 +3420,7 @@ function AdminMembers() {
           <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
             <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{r.nickname || "(닉네임 없음)"}</p>
             {r.is_admin && <span style={{ fontSize: 10, fontWeight: 700, color: T.violet, background: `${T.violet}18`, borderRadius: 999, padding: "2px 7px" }}>관리자</span>}
+            {r.is_deleted && <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, background: T.line, borderRadius: 999, padding: "2px 7px" }}>탈퇴함</span>}
             {r.is_blocked && <span style={{ fontSize: 10, fontWeight: 700, color: T.rose, background: `${T.rose}18`, borderRadius: 999, padding: "2px 7px" }}>차단됨</span>}
             <span style={{ marginLeft: "auto", fontSize: 11, color: T.muted }}>{fmt(r.created_at)} 가입</span>
           </div>
@@ -3648,6 +3728,7 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
   const [pwOpen, setPwOpen] = useState(false);
   const [routineOpen, setRoutineOpen] = useState(false);
   const [inqOpen, setInqOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const [newInq, setNewInq] = useState(0);   // 안 읽은 문의 개수 (관리자 배지)
   useEffect(() => {
     if (!isAdmin) return;
@@ -3731,7 +3812,9 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
           <ChevronRight size={18} color={T.muted} />
         </button>
         <button onClick={onOut} style={{ width: "100%", padding: "12px 0", borderRadius: 11, fontSize: 14.5, fontWeight: 700, color: T.rose, background: T.card, border: `1px solid ${T.line}` }}>로그아웃</button>
+        <button onClick={() => setLeaveOpen(true)} style={{ width: "100%", padding: "12px 0", marginTop: 8, fontSize: 12.5, fontWeight: 500, color: T.muted, background: "transparent" }}>회원 탈퇴</button>
       </div>
+      {leaveOpen && <LeaveSheet user={user} onClose={() => setLeaveOpen(false)} />}
       {inqOpen && <InquirySheet user={user} onClose={() => setInqOpen(false)} />}
       {routineOpen && <RoutineSheet onClose={() => setRoutineOpen(false)} />}
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
