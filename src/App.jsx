@@ -987,20 +987,36 @@ function renderContent(key, { openWeb, byCat }) {
         {PRAYER_PROMPTS.map((p) => <InfoLine key={p} icon={HeartHandshake} text={p} c={T.rose} />)}
       </div>
     );
-  if (key === "praise")
+  if (key === "praise") {
+    // 관리자에서 추가한 찬양(contents.category='praise')을 우선 사용, 없으면 기본 목록
+    const items = byCat("praise", PRAISE.map((s) => ({ title: s.t, subtitle: s.a, url: s.list, kind: "embed" })));
+    // url이 재생목록 ID든 유튜브 링크든 임베드 주소로 정규화
+    const toEmbed = (raw) => {
+      const u = (raw || "").trim();
+      if (!u) return "";
+      if (u.startsWith("http") && u.includes("/embed/")) return u;            // 이미 임베드 주소
+      const listMatch = u.match(/[?&]list=([\w-]+)/);                          // 재생목록 링크
+      if (listMatch) return `https://www.youtube.com/embed/videoseries?list=${listMatch[1]}`;
+      const vMatch = u.match(/(?:v=|youtu\.be\/|shorts\/)([\w-]{11})/);        // 단일 영상 링크
+      if (vMatch) return `https://www.youtube.com/embed/${vMatch[1]}`;
+      if (/^PL[\w-]+$/.test(u)) return `https://www.youtube.com/embed/videoseries?list=${u}`;  // 재생목록 ID만
+      if (/^[\w-]{11}$/.test(u)) return `https://www.youtube.com/embed/${u}`;  // 영상 ID만
+      return u;
+    };
     return (
       <div style={{ display: "grid", gap: 8 }}>
         <p style={{ margin: "0 0 2px", fontSize: 13.5, color: T.muted }}>재생목록을 누르면 앱 안에서 이어서 들을 수 있어요</p>
-        {PRAISE.map((s) => (
-          <button key={s.t} onClick={() => openWeb(ytEmbedList(s.list), s.t, "embed")} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", background: T.card, borderRadius: 12, padding: 10, border: `1px solid ${T.line}` }}>
+        {items.map((s, i) => (
+          <button key={s.id || s.title || i} onClick={() => openWeb(toEmbed(s.url), s.title, "embed")} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", background: T.card, borderRadius: 12, padding: 10, border: `1px solid ${T.line}` }}>
             <div style={{ width: 36, height: 36, borderRadius: 9, background: `${T.teal}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Play size={15} color={T.teal} fill={T.teal} /></div>
-            <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{s.t}</p><p style={{ margin: 0, fontSize: 13, color: T.muted }}>{s.a}</p></div>
+            <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{s.title}</p>{s.subtitle && <p style={{ margin: 0, fontSize: 13, color: T.muted }}>{s.subtitle}</p>}</div>
             <span style={{ fontSize: 10.5, fontWeight: 700, color: T.teal, background: `${T.teal}18`, borderRadius: 999, padding: "2px 7px", flexShrink: 0 }}>앱 내 재생</span>
           </button>
         ))}
         <p style={{ margin: "6px 2px 0", fontSize: 12, color: T.muted, lineHeight: 1.5 }}>* 유튜브 재생목록이 앱 안에서 이어 재생돼요. 광고가 있을 수 있어요.</p>
       </div>
     );
+  }
   if (key === "worship")
     return (
       <div style={{ display: "grid", gap: 12 }}>
@@ -1141,6 +1157,14 @@ function BibleFinder({ openWeb }) {
   const [noVoice, setNoVoice] = useState(false); // 이 기기에 해당 언어 음성이 없음
   const [readSet, setReadSet] = useState(new Set()); // 읽은 장 "책번호:장"
   const [uid, setUid] = useState(null);
+  const [useGoogle, setUseGoogle] = useState(true); // 자연 음성(구글) 우선 사용
+  const [gender, setGender] = useState(() => {
+    if (typeof localStorage !== "undefined") return localStorage.getItem("tl_tts_gender") || "male";
+    return "male";
+  });
+  const [ttsLoading, setTtsLoading] = useState(false); // 구글 음성 준비 중
+  const audioRef = useRef(null);   // 구글 mp3 재생용
+  const gStopRef = useRef(false);  // 구글 재생 중단 플래그
   const books = testament === "ot" ? BIBLE_OT : BIBLE_NT;
   const bookNo = (name) => {
     const oi = BIBLE_OT.findIndex((b) => b[0] === name);
@@ -1242,12 +1266,100 @@ function BibleFinder({ openWeb }) {
 
   const stopSpeak = () => {
     stopRef.current = true;
+    gStopRef.current = true;
     if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    if (audioRef.current) { try { audioRef.current.pause(); } catch (_) {} audioRef.current = null; }
     setSpeaking(false);
+    setTtsLoading(false);
     setCurIdx(-1);
   };
 
-  // startIdx 절부터 읽기 시작 (0 = 처음부터)
+  // 구글 자연 음성으로 읽기 (Edge Function 'tts' 사용). 실패하면 무료 TTS로 폴백.
+  const startSpeakGoogle = async (list, name, ch, startIdx = 0) => {
+    const from = Math.max(0, Math.min(startIdx, list.length - 1));
+    // 절을 순서대로, 각 절의 시작 글자 위치를 기억하며 하나의 텍스트로 (하이라이트용)
+    const items = list.map((v, i) => ({ i, text: (v[ver] || "").trim() })).filter((x) => x.text && x.i >= from);
+    if (!items.length) return;
+
+    // 구글 요청당 4800자 제한 → 절을 모아 블록으로 나눔 (블록 경계에 절 인덱스 기록)
+    const BLOCK = 3500;
+    const blocks = [];
+    let cur = null;
+    for (const it of items) {
+      if (!cur || cur.text.length + it.text.length > BLOCK) {
+        cur = { text: it.text, startI: it.i, marks: [{ at: 0, i: it.i }] };
+        blocks.push(cur);
+      } else {
+        cur.marks.push({ at: cur.text.length + 1, i: it.i });
+        cur.text += " " + it.text;
+      }
+    }
+
+    gStopRef.current = false; stopRef.current = false;
+    setSpeaking(true); setTtsLoading(true);
+    setCurIdx(from);
+
+    const langParam = ver === "ko" ? "ko" : "en";
+    // 언어 × 성별 음성 (구글 Neural2)
+    const VOICE_MAP = {
+      ko: { male: "ko-KR-Neural2-C", female: "ko-KR-Neural2-A" },
+      en: { male: "en-US-Neural2-D", female: "en-US-Neural2-F" },
+    };
+    const pickedVoice = VOICE_MAP[langParam]?.[gender] || undefined;
+
+    // 한 블록씩: 음성 받아서 재생 → 끝나면 다음 블록
+    const playBlock = async (k) => {
+      if (gStopRef.current || k >= blocks.length) return;
+      const block = blocks[k];
+      let audioB64 = null;
+      try {
+        const { data, error } = await supabase.functions.invoke("tts", {
+          body: { text: block.text, lang: langParam, voice: pickedVoice, rate: ver === "ko" ? rate * 0.96 : rate },
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        audioB64 = data?.audioContent || null;
+      } catch (e) {
+        // 구글 실패 → 무료 TTS로 폴백 (이 지점부터)
+        if (k === 0) {
+          setUseGoogle(false);
+          setTtsLoading(false);
+          startSpeak(list, name, ch, block.startI);   // 무료 엔진으로 전환
+          return;
+        }
+      }
+      if (gStopRef.current) return;
+      if (!audioB64) { // 개별 블록 실패 시 다음 블록 시도
+        if (k < blocks.length - 1) return playBlock(k + 1);
+        setSpeaking(false); setCurIdx(-1); return;
+      }
+
+      const audio = new Audio("data:audio/mp3;base64," + audioB64);
+      audioRef.current = audio;
+      setTtsLoading(false);
+      setCurIdx(block.startI); savePos(name, ch, block.startI);
+      audio.onended = () => {
+        if (gStopRef.current) return;
+        if (k < blocks.length - 1) playBlock(k + 1);
+        else { setSpeaking(false); setCurIdx(-1); clearPos(name, ch); markRead(name, ch); }
+      };
+      audio.onerror = () => {
+        if (gStopRef.current) return;
+        if (k < blocks.length - 1) playBlock(k + 1);
+        else { setSpeaking(false); setCurIdx(-1); }
+      };
+      try { await audio.play(); } catch (e) { audio.onerror(); }
+    };
+    playBlock(0);
+  };
+
+  // 재생 시작 진입점 — 구글 우선, 안 되면 무료
+  const beginSpeak = (list, name, ch, startIdx = 0) => {
+    if (useGoogle) startSpeakGoogle(list, name, ch, startIdx);
+    else startSpeak(list, name, ch, startIdx);
+  };
+
+  // startIdx 절부터 읽기 시작 (0 = 처음부터) — 무료 브라우저 TTS
   const startSpeak = (list, name, ch, startIdx = 0) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     const synth = window.speechSynthesis;
@@ -1287,32 +1399,47 @@ function BibleFinder({ openWeb }) {
     // cancel 직후 바로 speak하면 크롬에서 씹히는 경우가 있어 살짝 텀을 둠
     setTimeout(() => {
       stopRef.current = false;
-      chunks.forEach((chunk, k) => {
+      setSpeaking(true);
+
+      // ★ 덩어리를 한꺼번에 큐에 넣지 않고, 하나가 끝나면 다음 것을 재생.
+      //   모바일 브라우저가 긴 큐를 15초쯤에 끊어버리는 버그를 피함.
+      const speakChunk = (k) => {
+        if (stopRef.current || k >= chunks.length) return;
+        const chunk = chunks[k];
         const u = new SpeechSynthesisUtterance(chunk.text);
         u.lang = ver === "ko" ? "ko-KR" : "en-US";
         if (picked) u.voice = picked;
-        // 한국어는 살짝 낮고 느리게(부드럽게), 영어는 원래 톤 그대로가 자연스러움
         u.rate = ver === "ko" ? rate * 0.95 : rate;
         u.pitch = ver === "ko" ? 0.95 : 1;
         u.volume = 1;
         u.onstart = () => { setCurIdx(chunk.startI); savePos(name, ch, chunk.startI); };
-        // 덩어리 안에서 절이 바뀌는 지점마다 하이라이트를 옮김
         u.onboundary = (e) => {
           const idx = e.charIndex || 0;
           let now = chunk.marks[0].i;
           for (const m of chunk.marks) { if (idx >= m.at) now = m.i; else break; }
           setCurIdx(now);
         };
-        // ★ 끝까지 다 들었을 때만 읽기표에 체크 (중간에 멈추면 체크 안 함)
-        if (k === chunks.length - 1) u.onend = () => {
-          setSpeaking(false);
-          setCurIdx(-1);
-          if (!stopRef.current) { clearPos(name, ch); markRead(name, ch); }
+        u.onend = () => {
+          if (stopRef.current) return;
+          if (k < chunks.length - 1) {
+            speakChunk(k + 1);                 // 다음 덩어리로 이어서
+          } else {
+            // 마지막까지 다 들었을 때만 읽기표에 체크
+            setSpeaking(false);
+            setCurIdx(-1);
+            clearPos(name, ch); markRead(name, ch);
+          }
         };
-        u.onerror = () => { setSpeaking(false); setCurIdx(-1); };
+        u.onerror = () => {
+          // 일시적 오류면 다음 덩어리로 넘겨 계속 읽기 시도
+          if (stopRef.current) { setSpeaking(false); setCurIdx(-1); return; }
+          if (k < chunks.length - 1) speakChunk(k + 1);
+          else { setSpeaking(false); setCurIdx(-1); }
+        };
         synth.speak(u);
-      });
-      setSpeaking(true);
+      };
+
+      speakChunk(0);
     }, 120);
   };
 
@@ -1359,13 +1486,14 @@ function BibleFinder({ openWeb }) {
         {/* 음성으로 듣기 */}
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "9px 11px", marginBottom: 11 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => (speaking ? stopSpeak() : startSpeak(verses, book[0], chapter, savedIdx))} disabled={!verses.length}
+            <button onClick={() => (speaking ? stopSpeak() : beginSpeak(verses, book[0], chapter, savedIdx))} disabled={!verses.length}
               style={{ width: 34, height: 34, borderRadius: 999, flexShrink: 0, background: speaking ? T.rose : T.ink, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {speaking ? <X size={16} color="#fff" /> : <Play size={15} color="#fff" fill="#fff" />}
             </button>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: T.ink }}>
-                {speaking ? `읽는 중… ${verses[curIdx]?.verse ?? ""}${curIdx >= 0 ? "절" : ""} (누르면 정지)`
+                {ttsLoading ? "자연 음성 준비 중…"
+                  : speaking ? `읽는 중… ${verses[curIdx]?.verse ?? ""}${curIdx >= 0 ? "절" : ""} (누르면 정지)`
                   : savedIdx > 0 ? `이어 듣기 · ${verses[savedIdx]?.verse ?? savedIdx + 1}절부터`
                   : "성경 읽어주기"}
               </p>
@@ -1374,7 +1502,7 @@ function BibleFinder({ openWeb }) {
               </p>
             </div>
             {savedIdx > 0 && !speaking && (
-              <button onClick={() => startSpeak(verses, book[0], chapter, 0)}
+              <button onClick={() => beginSpeak(verses, book[0], chapter, 0)}
                 style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, padding: "5px 8px", borderRadius: 7, color: T.muted, border: `1px solid ${T.line}`, background: "transparent" }}>처음부터</button>
             )}
             <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
@@ -1382,6 +1510,23 @@ function BibleFinder({ openWeb }) {
                 <button key={r} onClick={() => setRate(r)} style={{ fontSize: 11, fontWeight: 700, padding: "4px 7px", borderRadius: 7, background: rate === r ? T.gold : "transparent", color: rate === r ? "#fff" : T.muted, border: `1px solid ${rate === r ? T.gold : T.line}` }}>{r}x</button>
               ))}
             </div>
+          </div>
+
+          {/* 남성 · 여성 목소리 선택 (자연 음성) */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 9 }}>
+            <span style={{ fontSize: 11, color: T.muted, fontWeight: 700 }}>목소리</span>
+            {[{ k: "male", l: "남성" }, { k: "female", l: "여성" }].map((g) => (
+              <button key={g.k}
+                onClick={() => {
+                  setGender(g.k);
+                  if (typeof localStorage !== "undefined") localStorage.setItem("tl_tts_gender", g.k);
+                  if (speaking) { const at = curIdx >= 0 ? curIdx : savedIdx; stopSpeak(); setTimeout(() => beginSpeak(verses, book[0], chapter, at), 200); }
+                }}
+                style={{ fontSize: 11.5, fontWeight: 700, padding: "5px 12px", borderRadius: 999, background: gender === g.k ? T.ink : "transparent", color: gender === g.k ? "#fff" : T.muted, border: `1px solid ${gender === g.k ? T.ink : T.line}` }}>
+                {g.l}
+              </button>
+            ))}
+            <span style={{ fontSize: 10.5, color: T.muted }}>재생 중 바꾸면 그 자리에서 다시 읽어요</span>
           </div>
 
           {/* 진행바 — 누르면 그 절로 이동 */}
@@ -1394,7 +1539,7 @@ function BibleFinder({ openWeb }) {
                   onClick={(e) => {
                     const r = e.currentTarget.getBoundingClientRect();
                     const p = Math.min(0.999, Math.max(0, (e.clientX - r.left) / r.width));
-                    startSpeak(verses, book[0], chapter, Math.floor(p * verses.length));
+                    beginSpeak(verses, book[0], chapter, Math.floor(p * verses.length));
                   }}
                   style={{ padding: "6px 0", cursor: "pointer" }}>
                   <div style={{ position: "relative", width: "100%", height: 6, borderRadius: 999, background: T.line }}>
@@ -1451,7 +1596,7 @@ function BibleFinder({ openWeb }) {
             {verses.map((v, i) => (
               <p key={v.verse}
                 ref={(el) => { verseRefs.current[i] = el; }}
-                onClick={() => startSpeak(verses, book[0], chapter, i)}
+                onClick={() => beginSpeak(verses, book[0], chapter, i)}
                 style={{ margin: "0 -7px 4px", padding: "5px 7px", borderRadius: 8, cursor: "pointer",
                   background: curIdx === i ? `${T.gold}22` : "transparent",
                   fontSize: ver === "ko" ? 15 : 14, lineHeight: 1.75, color: T.inkSoft, fontFamily: serif, transition: "background .2s" }}>
@@ -3682,7 +3827,7 @@ function AdminPanel({ onClose, dbContents, dbVerses, reload }) {
             </>
           ) : (
             <>
-              <button onClick={() => setEditing({ title: "", subtitle: "", url: "", kind: "site", sort_order: rows.length + 1 })} style={{ width: "100%", padding: "12px 0", borderRadius: 11, background: T.gold, color: "#fff", fontSize: 14, fontWeight: 700, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><Plus size={16} /> 새 항목 추가</button>
+              <button onClick={() => setEditing({ title: "", subtitle: "", url: "", kind: (tab === "qt" || tab === "praise" || tab === "worship") ? "embed" : "site", sort_order: rows.length + 1 })} style={{ width: "100%", padding: "12px 0", borderRadius: 11, background: T.gold, color: "#fff", fontSize: 14, fontWeight: 700, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><Plus size={16} /> 새 항목 추가</button>
               {rows.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>아직 등록된 항목이 없어요.</p>}
               {rows.map((r) => (
                 <div key={r.id} style={{ background: T.card, borderRadius: 12, border: `1px solid ${T.line}`, padding: 13, marginBottom: 9 }}>
@@ -3726,7 +3871,7 @@ function ContentForm({ row, cat, onCancel, onSave }) {
               <button key={o.k} onClick={() => set("kind", o.k)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, fontSize: 13, fontWeight: 700, background: f.kind === o.k ? T.ink : T.card, color: f.kind === o.k ? "#fff" : T.muted, border: `1px solid ${f.kind === o.k ? T.ink : T.line}` }}>{o.l}</button>
             ))}
           </div>
-          <p style={{ margin: "7px 2px 0", fontSize: 11.5, color: T.muted, lineHeight: 1.5 }}>* 유튜브 재생목록은 <b>youtube.com/embed/videoseries?list=…</b> 형태로 넣고 "앱 안에서 재생"을 고르세요.</p>
+          <p style={{ margin: "7px 2px 0", fontSize: 11.5, color: T.muted, lineHeight: 1.55 }}>* 유튜브 <b>재생목록 주소</b>(youtube.com/playlist?list=…)나 <b>재생목록 ID</b>(PL…)만 붙여넣어도 앱 안에서 재생돼요. 단일 영상 주소도 가능해요. "앱 안에서 재생"을 골라주세요.</p>
         </div>
       )}
       <button onClick={() => onSave(f)} disabled={!f.title} style={{ width: "100%", padding: "13px 0", borderRadius: 11, fontSize: 15, fontWeight: 700, background: f.title ? T.ink : T.line, color: f.title ? "#fff" : T.muted }}>저장</button>
