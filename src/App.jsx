@@ -1817,7 +1817,6 @@ function Community(ctx) {
         {sub === "dm" && <Messages {...ctx} />}
       </div>
 
-      {routineOpen && <RoutineSheet onClose={() => setRoutineOpen(false)} />}
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
     </div>
   );
