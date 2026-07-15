@@ -523,22 +523,25 @@ export default function App() {
         setGrowingFruit(p.growing_fruit || null);
         setGrowStep(p.grow_step || 0);
       }
-      // 오늘 기록
+      // 신앙일기 (전체) — 오늘 완료 여부의 원본 소스
+      const { data: j } = await supabase.from("journal")
+        .select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(200);
+      const journalRows = j || [];
+      if (j) setJournal(journalRows.map((r) => ({ id: r.id, date: r.day, dim: r.dim, note: r.note || "", time: "" })));
+
+      // 오늘 완료한 훈련들을 신앙일기에서 직접 계산 (새로고침해도 사라지지 않게)
+      const todayDims = [...new Set(journalRows.filter((r) => r.day === todayKey()).map((r) => r.dim))];
+      const todayPtsCalc = todayDims.reduce((n, k) => n + (DIM[k]?.pts || 0), 0);
+
+      // daily_logs는 목표달성·암송 여부 등 보조 정보로만 사용
       const { data: d } = await supabase.from("daily_logs")
         .select("*").eq("user_id", uid).eq("day", todayKey()).maybeSingle();
-      if (d) {
-        setTodayPts(d.today_pts || 0);
-        setGoalHitToday(!!d.goal_hit);
-        setMemDone(!!d.mem_done);
-        setDone7(Object.fromEntries(DIMS.map((x) => [x.key, (d.done_dims || []).includes(x.key)])));
-      } else {
-        setTodayPts(0); setGoalHitToday(false); setMemDone(false);
-        setDone7(Object.fromEntries(DIMS.map((x) => [x.key, false])));
-      }
-      // 신앙일기
-      const { data: j } = await supabase.from("journal")
-        .select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(60);
-      if (j) setJournal(j.map((r) => ({ id: r.id, date: r.day, dim: r.dim, note: r.note || "", time: "" })));
+
+      setDone7(Object.fromEntries(DIMS.map((x) => [x.key, todayDims.includes(x.key)])));
+      setTodayPts(todayPtsCalc);
+      setGoalHitToday(!!d?.goal_hit || todayPtsCalc >= (p?.daily_goal || DEFAULT_GOAL));
+      setMemDone(!!d?.mem_done);
+
       setLoaded(true);
     })();
   }, [session]);
@@ -633,11 +636,21 @@ export default function App() {
 
   const completeDim = async (key, note, isPublic = false) => {
     if (!requireAuth("인증을 저장하려면 로그인이 필요해요")) return false;
-    const first = !done7[key];
+    const first = !done7[key];   // 오늘 이 훈련을 처음 완료하는가
     setDone7((d) => ({ ...d, [key]: true }));
-    setJournal((j) => [{ id: Date.now(), date: todayKey(), dim: key, note: (note || "").trim(), time: "방금", is_public: isPublic }, ...j]);
+    // 화면의 신앙일기도 하루+훈련당 하나만 유지 (기존 것 교체)
+    setJournal((j) => {
+      const filtered = j.filter((e) => !(e.date === todayKey() && e.dim === key));
+      return [{ id: Date.now(), date: todayKey(), dim: key, note: (note || "").trim(), time: "방금", is_public: isPublic }, ...filtered];
+    });
+    // 점수는 그날 처음 완료할 때만 (재인증은 내용만 수정, 점수 중복 없음)
     if (first) award(DIM[key].pts, `${DIM[key].label} 훈련`);
-    if (uid) await supabase.from("journal").insert({ user_id: uid, day: todayKey(), dim: key, note: (note || "").trim(), is_public: isPublic });
+    // DB에도 하루+훈련당 한 줄만: 있으면 수정, 없으면 추가
+    if (uid) {
+      await supabase.from("journal")
+        .upsert({ user_id: uid, day: todayKey(), dim: key, note: (note || "").trim(), is_public: isPublic },
+                { onConflict: "user_id,day,dim" });
+    }
     return true;
   };
 
@@ -1665,12 +1678,23 @@ function InfoLine({ icon: Icon, text, c = T.inkSoft }) {
 /* ─────────────────────────────────────────────
    신앙일기
 ────────────────────────────────────────────── */
-function Journal({ journal, done7, doneCount }) {
+function Journal({ journal: rawJournal, done7, doneCount }) {
   const [mode, setMode] = useState("cal");     // cal(달력) | list(목록)
   const [pickDay, setPickDay] = useState(null); // 선택한 날짜
   const [filter, setFilter] = useState(null);   // 훈련 필터
   const [q, setQ] = useState("");               // 검색어
   const [month, setMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+
+  // 하루+훈련당 하나만 남기기 (예전 중복 데이터도 화면에선 최신 하나로)
+  const journal = useMemo(() => {
+    const seen = new Set(); const out = [];
+    for (const e of rawJournal) {
+      const k = `${e.date}|${e.dim}`;
+      if (seen.has(k)) continue;
+      seen.add(k); out.push(e);
+    }
+    return out;
+  }, [rawJournal]);
 
   // 날짜별 그룹
   const byDay = useMemo(() => {
@@ -3167,14 +3191,17 @@ function EditProfileSheet({ user, onClose }) {
     if (!nick.trim() || busy) return;
     setBusy(true); setErr("");
     try {
-      await supabase.auth.updateUser({ data: { nickname: nick.trim(), church: church.trim() || "미입력" } });
-      const { error } = await supabase.from("profiles").update({ nickname: nick.trim(), church: church.trim() || "미입력" }).eq("id", user.id);
+      // 1) 로그인 계정 메타데이터 (인사말·프로필 판정에 사용)
+      const { error: authErr } = await supabase.auth.updateUser({ data: { nickname: nick.trim(), church: church.trim() || "미입력" } });
+      if (authErr) throw authErr;
+      // 2) profiles 테이블 (커뮤니티 표시용). 행이 없을 수도 있어 upsert
+      const { error } = await supabase.from("profiles")
+        .upsert({ id: user.id, nickname: nick.trim(), church: church.trim() || "미입력", email: user.email || null }, { onConflict: "id" });
       if (error) throw error;
       setSaved(true);
-      // 변경사항을 화면에 반영하려면 새로고침이 가장 확실
       setTimeout(() => { if (typeof window !== "undefined") window.location.reload(); }, 700);
     } catch (e) {
-      setErr("저장 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.");
+      setErr("저장 실패: " + (e?.message || "잠시 후 다시 시도해 주세요."));
       setBusy(false);
     }
   };
