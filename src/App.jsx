@@ -333,15 +333,12 @@ function useWeather() {
 
 const READING = { plan: "맥체인 통독", today: "창세기 12장 · 마태복음 11장" };
 
-/* 찬양 — 앱 안에서 유튜브로 감상 (검색 결과를 앱 내 플레이어로 재생) */
+/* 찬양 — 앱 안에서 유튜브 재생목록으로 감상 (QT와 같은 확실한 임베드 방식) */
 const ytSearch = (q) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
-const ytEmbedSearch = (q) => `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(q)}`;
+const ytEmbedList = (id) => `https://www.youtube.com/embed/videoseries?list=${id}`;
 const PRAISE = [
-  { t: "주 은혜임을", a: "제이어스" },
-  { t: "예배자", a: "어노인팅" },
-  { t: "은혜 아니면", a: "손경민" },
-  { t: "주께 가오니", a: "마커스" },
-  { t: "성령이 오셨네", a: "제이어스" },
+  { t: "마커스 찬양 모음", a: "MARKERS · 예배 인도 찬양", list: "PLktmCVYj9fbmXyt1i3dyB4BZ_8qgEahc6" },
+  { t: "CCM 인기 찬양 모음", a: "은혜로운 찬양 연속듣기", list: "PLNOQEpM6CkBocaUPCbzjbTYjkEX5bCyX2" },
 ];
 
 /* 예배 — 예배별 설교 링크 (교회 유튜브로 연결) */
@@ -993,15 +990,15 @@ function renderContent(key, { openWeb, byCat }) {
   if (key === "praise")
     return (
       <div style={{ display: "grid", gap: 8 }}>
-        <p style={{ margin: "0 0 2px", fontSize: 13.5, color: T.muted }}>곡을 누르면 앱 안에서 바로 들을 수 있어요</p>
+        <p style={{ margin: "0 0 2px", fontSize: 13.5, color: T.muted }}>재생목록을 누르면 앱 안에서 이어서 들을 수 있어요</p>
         {PRAISE.map((s) => (
-          <button key={s.t} onClick={() => openWeb(ytEmbedSearch(`${s.t} ${s.a}`), `${s.t} · ${s.a}`, "embed")} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", background: T.card, borderRadius: 12, padding: 10, border: `1px solid ${T.line}` }}>
+          <button key={s.t} onClick={() => openWeb(ytEmbedList(s.list), s.t, "embed")} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", background: T.card, borderRadius: 12, padding: 10, border: `1px solid ${T.line}` }}>
             <div style={{ width: 36, height: 36, borderRadius: 9, background: `${T.teal}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Play size={15} color={T.teal} fill={T.teal} /></div>
             <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{s.t}</p><p style={{ margin: 0, fontSize: 13, color: T.muted }}>{s.a}</p></div>
             <span style={{ fontSize: 10.5, fontWeight: 700, color: T.teal, background: `${T.teal}18`, borderRadius: 999, padding: "2px 7px", flexShrink: 0 }}>앱 내 재생</span>
           </button>
         ))}
-        <p style={{ margin: "6px 2px 0", fontSize: 12, color: T.muted, lineHeight: 1.5 }}>* 유튜브 검색 결과의 첫 곡이 앱 안에서 재생돼요. 광고가 있을 수 있어요.</p>
+        <p style={{ margin: "6px 2px 0", fontSize: 12, color: T.muted, lineHeight: 1.5 }}>* 유튜브 재생목록이 앱 안에서 이어 재생돼요. 광고가 있을 수 있어요.</p>
       </div>
     );
   if (key === "worship")
