@@ -416,6 +416,7 @@ export default function App() {
   const [faithDays, setFaithDays] = useState(0); // 하루 60점 이상 달성한 날의 수
   const [goalHitToday, setGoalHitToday] = useState(false);
   const [toast, setToast] = useState(null);
+  const [needAuth, setNeedAuth] = useState(null); // 로그인 유도 사유 문구 (null이면 안 뜸)
 
   // Supabase 로그인 세션
   const [session, setSession] = useState(null);
@@ -448,6 +449,13 @@ export default function App() {
   // 로그인 안 했으면 null 참조로 터지지 않게 user에서만 판단
   const profileComplete = !!(user && user.hasNickname);
   const signOut = () => supabase.auth.signOut();
+  // 로그인이 필요한 행동을 감쌈: 로그인 안 했으면 로그인 시트를 띄우고 false 반환
+  const requireAuth = (reason) => {
+    if (session) return true;
+    setSheet(null);   // 열려있는 훈련 시트를 닫고 로그인 화면을 보여줌
+    setNeedAuth(reason || "이 기능은 로그인 후 이용할 수 있어요");
+    return false;
+  };
 
   // 관리자 여부 + DB 콘텐츠
   const [isAdmin, setIsAdmin] = useState(false);
@@ -585,9 +593,13 @@ export default function App() {
 
   useEffect(() => {
     if (!uid || !loaded) return;
+    const dims = DIMS.filter((x) => done7[x.key]).map((x) => x.key);
+    // ★ 초기 로드 직후 아무 것도 안 한 상태(0점·미완료)로 서버를 덮어써 기록이 지워지는 것 방지.
+    //    실제로 오늘 뭔가 했을 때만 저장한다.
+    if (todayPts === 0 && !goalHitToday && !memDone && dims.length === 0) return;
     supabase.from("daily_logs").upsert({
       user_id: uid, day: todayKey(), today_pts: todayPts, goal_hit: goalHitToday,
-      mem_done: memDone, done_dims: DIMS.filter((x) => done7[x.key]).map((x) => x.key),
+      mem_done: memDone, done_dims: dims,
     }, { onConflict: "user_id,day" }).then(() => {});
   }, [uid, loaded, todayPts, goalHitToday, memDone, done7]);
 
@@ -620,6 +632,7 @@ export default function App() {
   };
 
   const completeDim = async (key, note, isPublic = false) => {
+    if (!requireAuth("인증을 저장하려면 로그인이 필요해요")) return false;
     const first = !done7[key];
     setDone7((d) => ({ ...d, [key]: true }));
     setJournal((j) => [{ id: Date.now(), date: todayKey(), dim: key, note: (note || "").trim(), time: "방금", is_public: isPublic }, ...j]);
@@ -629,14 +642,18 @@ export default function App() {
   };
 
   const doMemorize = () => {
+    if (!requireAuth("암송을 저장하려면 로그인이 필요해요")) return;
     if (memDone) return;
     setMemDone(true);
     setMemStreak((s) => s + 1);
     award(5, "말씀 암송");
   };
 
+  // 훈련 시트 열기 — 둘러보기는 가능하지만 완료(저장)는 로그인 필요
+  const openSheet = (key) => setSheet(key);
+
   const doneCount = DIMS.filter((d) => done7[d.key]).length;
-  const ctx = { tab, setTab, points, log, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, dmUnread, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal };
+  const ctx = { tab, setTab, points, log, user, profileComplete, authReady, signOut, requireAuth, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet: openSheet, completeDim, dmUnread, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal };
 
   if (recovery) return (
     <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
@@ -663,11 +680,11 @@ export default function App() {
         <div style={{ flex: 1, overflowY: "auto", paddingBottom: 84 }}>
           {!authReady ? (
             <div style={{ padding: 80, textAlign: "center", color: T.muted, fontSize: 14 }}>불러오는 중…</div>
-          ) : !session ? (
-            <SignIn />
-          ) : !profileComplete ? (
+          ) : session && !profileComplete ? (
+            // 로그인은 했지만 닉네임을 아직 안 정한 경우만 설정 화면으로
             <ProfileSetup user={user} />
           ) : (
+            // 로그인 안 해도 둘러볼 수 있음. 저장이 필요한 순간에만 로그인 유도(needAuth)
             <>
               {tab === "home" && <Home {...ctx} />}
               {tab === "journal" && <Journal {...ctx} />}
@@ -677,6 +694,16 @@ export default function App() {
             </>
           )}
         </div>
+
+        {/* 로그인이 필요한 행동을 하면 떠오르는 로그인 시트 */}
+        {needAuth && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 90, background: T.paper, overflowY: "auto" }}>
+            <div style={{ padding: "12px 16px 0" }}>
+              <button onClick={() => setNeedAuth(false)} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, color: T.muted, fontWeight: 500 }}><ChevronLeft size={16} /> 둘러보기로 돌아가기</button>
+            </div>
+            <SignIn reason={needAuth} />
+          </div>
+        )}
 
         {sheet && <TrainSheet dimKey={sheet} done={done7[sheet]} onClose={() => setSheet(null)} onComplete={completeDim} byCat={byCat} verseToday={verseToday} />}
 
@@ -1827,9 +1854,9 @@ function Community(ctx) {
       </div>
 
       <div style={{ paddingTop: 12 }}>
-        {sub === "feed" && <Feed award={ctx.award} />}
-        {sub === "rooms" && <Rooms award={ctx.award} />}
-        {sub === "dm" && <Messages />}
+        {sub === "feed" && <Feed award={ctx.award} requireAuth={ctx.requireAuth} />}
+        {sub === "rooms" && <Rooms award={ctx.award} requireAuth={ctx.requireAuth} />}
+        {sub === "dm" && <Messages requireAuth={ctx.requireAuth} />}
       </div>
 
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
@@ -1837,7 +1864,7 @@ function Community(ctx) {
   );
 }
 
-function Feed({ award }) {
+function Feed({ award, requireAuth }) {
   const [posts, setPosts] = useState(null);
   const [text, setText] = useState("");
   const [writing, setWriting] = useState(false);
@@ -1888,7 +1915,7 @@ function Feed({ award }) {
   };
 
   const amen = async (p) => {
-    if (!uid) return;
+    if (!uid) { requireAuth && requireAuth("아멘으로 응원하려면 로그인이 필요해요"); return; }
     // 낙관적 업데이트
     setPosts((ps) => ps.map((x) => x.id === p.id ? { ...x, amened: !x.amened, amen: x.amened ? x.amen - 1 : x.amen + 1 } : x));
     if (p.amened) {
@@ -1914,7 +1941,7 @@ function Feed({ award }) {
     <div>
       <div style={{ padding: "0 16px" }}>
         {!writing ? (
-          <button onClick={() => setWriting(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 11, background: T.card, borderRadius: 14, padding: 13, border: `1px solid ${T.line}`, marginBottom: 16, textAlign: "left" }}>
+          <button onClick={() => { if (requireAuth && !requireAuth("나눔을 남기려면 로그인이 필요해요")) return; setWriting(true); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 11, background: T.card, borderRadius: 14, padding: 13, border: `1px solid ${T.line}`, marginBottom: 16, textAlign: "left" }}>
             <Avatar init="✦" c={T.gold} /><span style={{ flex: 1, color: T.muted, fontSize: 14.5 }}>오늘 어떤 은혜가 있었나요?</span><PenLine size={17} color={T.gold} />
           </button>
         ) : (
@@ -1958,7 +1985,7 @@ function Feed({ award }) {
 }
 
 /* ── 방 (그룹) ── */
-function Rooms({ award }) {
+function Rooms({ award, requireAuth }) {
   const [rooms, setRooms] = useState([]);
   const [members, setMembers] = useState([]);   // 내 멤버십
   const [counts, setCounts] = useState({});     // 방별 인원
@@ -2000,7 +2027,7 @@ function Rooms({ award }) {
     }
   };
   const join = async (room) => {
-    if (!uid) return;
+    if (!uid) { requireAuth && requireAuth("방에 참여하려면 로그인이 필요해요"); return; }
     await supabase.from("room_members").insert({
       room_id: room.id, user_id: uid,
       status: room.is_private ? "pending" : "member",
@@ -2029,7 +2056,7 @@ function Rooms({ award }) {
         ))}
       </div>
 
-      <button onClick={() => setCreating(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: T.card, border: `1px dashed ${T.gold}`, borderRadius: 14, padding: 13, marginBottom: 14, fontSize: 14.5, fontWeight: 700, color: T.goldDeep }}>
+      <button onClick={() => { if (requireAuth && !requireAuth("방을 만들려면 로그인이 필요해요")) return; setCreating(true); }} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: T.card, border: `1px dashed ${T.gold}`, borderRadius: 14, padding: 13, marginBottom: 14, fontSize: 14.5, fontWeight: 700, color: T.goldDeep }}>
         <Plus size={16} /> 새로운 방 만들기
       </button>
 
@@ -2428,7 +2455,7 @@ function CreateRoomSheet({ onClose, onCreate }) {
 }
 
 /* ── 쪽지 (1:1) ── */
-function Messages() {
+function Messages({ requireAuth }) {
   const [uid, setUid] = useState(null);
   const [threads, setThreads] = useState(null);
   const [open, setOpen] = useState(null);   // 상대 user_id
@@ -2465,6 +2492,14 @@ function Messages() {
 
   if (open) return <Thread peer={open} me={uid} onBack={() => { setOpen(null); load(); }} />;
   if (picking) return <PickUser me={uid} onPick={(pid) => { setPicking(false); setOpen(pid); }} onBack={() => setPicking(false)} />;
+
+  if (!uid) return (
+    <div style={{ padding: "40px 24px", textAlign: "center" }}>
+      <MessageCircle size={30} color={T.muted} style={{ marginBottom: 10 }} />
+      <p style={{ margin: "0 0 14px", fontSize: 14, color: T.muted, lineHeight: 1.6 }}>쪽지는 로그인 후 지체들과<br />주고받을 수 있어요.</p>
+      <button onClick={() => requireAuth && requireAuth("쪽지를 주고받으려면 로그인이 필요해요")} style={{ padding: "11px 22px", borderRadius: 999, background: T.ink, color: "#fff", fontSize: 14, fontWeight: 700 }}>로그인하기</button>
+    </div>
+  );
 
   return (
     <div style={{ padding: "0 16px" }}>
@@ -3120,6 +3155,46 @@ const INQ_KINDS = [
   { k: "etc", label: "기타" },
 ];
 
+/* 내 정보 변경 — 닉네임 · 소속 교회 */
+function EditProfileSheet({ user, onClose }) {
+  const [nick, setNick] = useState(user?.name || "");
+  const [church, setChurch] = useState(user?.church && user.church !== "미입력" ? user.church : "");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState("");
+
+  const save = async () => {
+    if (!nick.trim() || busy) return;
+    setBusy(true); setErr("");
+    try {
+      await supabase.auth.updateUser({ data: { nickname: nick.trim(), church: church.trim() || "미입력" } });
+      const { error } = await supabase.from("profiles").update({ nickname: nick.trim(), church: church.trim() || "미입력" }).eq("id", user.id);
+      if (error) throw error;
+      setSaved(true);
+      // 변경사항을 화면에 반영하려면 새로고침이 가장 확실
+      setTimeout(() => { if (typeof window !== "undefined") window.location.reload(); }, 700);
+    } catch (e) {
+      setErr("저장 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet onClose={onClose} accent={T.sage} title={<><User size={16} color={T.sage} /> 내 정보 변경</>}>
+      <p style={{ margin: "0 0 14px", fontSize: 14, color: T.muted, lineHeight: 1.6 }}>공동체에서 보일 이름과 소속을 바꿀 수 있어요.</p>
+      <Field icon={User} label="닉네임" placeholder="공동체에서 불릴 이름" value={nick} onChange={setNick} />
+      <Field icon={Church} label="소속 교회 (선택)" placeholder="예 · 은혜교회 중고등부" value={church} onChange={setChurch} />
+
+      {err && <p style={{ margin: "2px 0 10px", fontSize: 12.5, color: T.rose }}>{err}</p>}
+
+      <button onClick={save} disabled={!nick.trim() || busy}
+        style={{ width: "100%", padding: "14px 0", marginTop: 6, borderRadius: 11, fontSize: 15, fontWeight: 700, background: saved ? T.sageSoft : (nick.trim() && !busy ? T.ink : T.line), color: saved ? T.sage : (nick.trim() && !busy ? "#fff" : T.muted), display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+        {busy ? "저장 중…" : saved ? <><Check size={16} /> 저장됐어요</> : "저장하기"}
+      </button>
+    </Sheet>
+  );
+}
+
 /* 회원 탈퇴 — 계정 비활성화 (정보 가림 · 완전삭제는 하지 않음) */
 function LeaveSheet({ user, onClose }) {
   const [confirmText, setConfirmText] = useState("");
@@ -3726,6 +3801,7 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
   const [invite, setInvite] = useState(false);
   const [safety, setSafety] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [routineOpen, setRoutineOpen] = useState(false);
   const [inqOpen, setInqOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -3787,14 +3863,24 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
           </div>
           <ChevronRight size={18} color={T.muted} />
         </button>
-        <button onClick={() => setPwOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
-          <div style={{ width: 40, height: 40, borderRadius: 11, background: T.goldSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Lock size={20} color={T.goldDeep} /></div>
+        <button onClick={() => setEditOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: `${T.sage}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><User size={20} color={T.sage} /></div>
           <div style={{ flex: 1 }}>
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>비밀번호 설정</p>
-            <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted }}>이메일 + 비밀번호로 로그인하기</p>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>내 정보 변경</p>
+            <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted }}>닉네임 · 소속 교회 수정</p>
           </div>
           <ChevronRight size={18} color={T.muted} />
         </button>
+        {!kakao && (
+          <button onClick={() => setPwOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
+            <div style={{ width: 40, height: 40, borderRadius: 11, background: T.goldSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Lock size={20} color={T.goldDeep} /></div>
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>비밀번호 설정</p>
+              <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted }}>이메일 + 비밀번호로 로그인하기</p>
+            </div>
+            <ChevronRight size={18} color={T.muted} />
+          </button>
+        )}
         <button onClick={() => setSafety(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: `${T.rose}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><ShieldCheck size={20} color={T.rose} /></div>
           <div style={{ flex: 1 }}>
@@ -3815,6 +3901,7 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
         <button onClick={() => setLeaveOpen(true)} style={{ width: "100%", padding: "12px 0", marginTop: 8, fontSize: 12.5, fontWeight: 500, color: T.muted, background: "transparent" }}>회원 탈퇴</button>
       </div>
       {leaveOpen && <LeaveSheet user={user} onClose={() => setLeaveOpen(false)} />}
+      {editOpen && <EditProfileSheet user={user} onClose={() => setEditOpen(false)} />}
       {inqOpen && <InquirySheet user={user} onClose={() => setInqOpen(false)} />}
       {routineOpen && <RoutineSheet onClose={() => setRoutineOpen(false)} />}
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
@@ -3912,7 +3999,7 @@ function NewPassword({ onDone, embedded }) {
   );
 }
 
-function SignIn() {
+function SignIn({ reason }) {
   const [mode, setMode] = useState("login");   // login | signup | reset
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -3970,6 +4057,12 @@ function SignIn() {
     <div>
       <Header title="함께 시작하기" subtitle="여러 교회의 지체들이 함께하는 공간" />
       <div style={{ padding: "0 16px" }}>
+        {reason && (
+          <div style={{ background: `${T.violet}0E`, border: `1px solid ${T.violet}33`, borderRadius: 11, padding: "11px 13px", marginBottom: 14, display: "flex", gap: 8, alignItems: "center" }}>
+            <Sparkles size={15} color={T.violet} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.5 }}>{reason}</span>
+          </div>
+        )}
         <div style={{ background: `linear-gradient(150deg, #FFFDF7, ${T.goldSoft})`, borderRadius: 14, padding: "16px", border: `1px solid ${T.goldSoft}`, textAlign: "center", marginBottom: 18 }}>
           <p style={{ fontFamily: serif, fontSize: 16, lineHeight: 1.7, color: T.ink, margin: 0 }}>"수고하고 무거운 짐 진 자들아<br />다 내게로 오라. 내가 너희를 쉬게 하리라"</p>
           <p style={{ margin: "9px 0 0", fontSize: 12.5, color: T.goldDeep, fontWeight: 700 }}>마태복음 11:28 · 함께 걸어요</p>
