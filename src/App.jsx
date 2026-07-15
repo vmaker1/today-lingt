@@ -619,6 +619,7 @@ export default function App() {
     setJournal((j) => [{ id: Date.now(), date: todayKey(), dim: key, note: (note || "").trim(), time: "방금", is_public: isPublic }, ...j]);
     if (first) award(DIM[key].pts, `${DIM[key].label} 훈련`);
     if (uid) await supabase.from("journal").insert({ user_id: uid, day: todayKey(), dim: key, note: (note || "").trim(), is_public: isPublic });
+    return true;
   };
 
   const doMemorize = () => {
@@ -848,8 +849,19 @@ function TrainSheet({ dimKey, done, onClose, onComplete, byCat, verseToday }) {
   const [note, setNote] = useState("");
   const [pub, setPub] = useState(false);
   const [web, setWeb] = useState(null);
+  const [saved, setSaved] = useState(done);   // 이미 완료했으면 저장됨 상태로 시작
+  const [busy, setBusy] = useState(false);
   const Ic = dim.icon;
   const openWeb = (url, title, kind) => setWeb({ url, title, kind });
+
+  // ★ 저장만 함 (창은 닫지 않음)
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    await onComplete(dimKey, note, pub);
+    setBusy(false);
+    setSaved(true);
+  };
 
   return (
     <Sheet onClose={onClose} accent={dim.c} title={<><Ic size={16} color={dim.c} /> {dim.label}</>}>
@@ -858,10 +870,10 @@ function TrainSheet({ dimKey, done, onClose, onComplete, byCat, verseToday }) {
       <div style={{ marginBottom: 16 }}>{renderContent(dimKey, { openWeb, byCat })}</div>
 
       <p style={{ margin: "0 0 7px", fontSize: 14, fontWeight: 700, color: T.ink }}>오늘의 후기</p>
-      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={dim.prompt}
+      <textarea value={note} onChange={(e) => { setNote(e.target.value); if (saved) setSaved(false); }} rows={3} placeholder={dim.prompt}
         style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px 13px", fontSize: 14.5, lineHeight: 1.6, color: T.ink, outline: "none", resize: "none", background: T.paper }} />
 
-      <button onClick={() => setPub((v) => !v)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, background: pub ? T.sageSoft : T.card, border: `1px solid ${pub ? T.sage : T.line}`, borderRadius: 11, padding: "11px 13px", marginTop: 10, marginBottom: 2, textAlign: "left" }}>
+      <button onClick={() => { setPub((v) => !v); if (saved) setSaved(false); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, background: pub ? T.sageSoft : T.card, border: `1px solid ${pub ? T.sage : T.line}`, borderRadius: 11, padding: "11px 13px", marginTop: 10, marginBottom: 2, textAlign: "left" }}>
         <span style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, background: pub ? T.sage : "#fff", border: `1px solid ${pub ? T.sage : T.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>{pub && <Check size={12} color="#fff" />}</span>
         <span style={{ flex: 1, minWidth: 0 }}>
           <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: T.ink }}>{pub ? "함께 나눔에 공개" : "나만 보기 (비공개)"}</span>
@@ -869,14 +881,28 @@ function TrainSheet({ dimKey, done, onClose, onComplete, byCat, verseToday }) {
         </span>
         {pub ? <Users size={16} color={T.sage} /> : <Lock size={15} color={T.muted} />}
       </button>
-      <button onClick={() => { onComplete(dimKey, note, pub); onClose(); }} disabled={done}
-        style={{ width: "100%", padding: "13px 0", marginTop: 12, borderRadius: 12, fontSize: 16, fontWeight: 700, background: done ? T.sageSoft : dim.c, color: done ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-        {done ? <><Check size={16} /> 오늘 완료됨</> : <><PenLine size={15} /> 훈련 완료 · 일기 저장 · +{dim.pts}P</>}
+
+      {/* ★ 저장 버튼 — 눌러도 창은 그대로. 저장되면 안내가 뜨고 계속 이어갈 수 있어요 */}
+      <button onClick={save} disabled={busy}
+        style={{ width: "100%", padding: "13px 0", marginTop: 12, borderRadius: 12, fontSize: 16, fontWeight: 700, background: saved ? T.sageSoft : dim.c, color: saved ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+        {busy ? "저장 중…" : saved ? <><Check size={16} /> 저장됨 · 다시 저장</> : <><PenLine size={15} /> {done ? "후기 저장하기" : `훈련 완료 · 일기 저장 · +${dim.pts}P`}</>}
+      </button>
+
+      {saved && (
+        <p style={{ margin: "9px 2px 0", fontSize: 12, color: T.sage, textAlign: "center", fontWeight: 600 }}>
+          신앙일기에 저장됐어요 ✦ 이어서 더 훈련하거나 아래로 닫을 수 있어요
+        </p>
+      )}
+
+      {/* ★ 닫기 — 저장과 완전히 분리 */}
+      <button onClick={onClose}
+        style={{ width: "100%", padding: "12px 0", marginTop: 9, borderRadius: 12, fontSize: 14.5, fontWeight: 700, background: T.card, color: T.muted, border: `1px solid ${T.line}` }}>
+        닫기
       </button>
 
       {web && <WebView url={web.url} title={web.title} kind={web.kind} onClose={() => setWeb(null)}
-        note={note} setNote={setNote} done={done} dim={dim}
-        onComplete={() => { onComplete(dimKey, note, pub); setWeb(null); onClose(); }} />}
+        note={note} setNote={setNote} pub={pub} setPub={setPub} done={done} dim={dim}
+        onComplete={onComplete} dimKey={dimKey} />}
     </Sheet>
   );
 }
@@ -1155,10 +1181,11 @@ function BibleFinder({ openWeb }) {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     const synth = window.speechSynthesis;
 
-    // ★ 절 번호는 읽지 않음. 절마다 끊어 읽어서 숨 쉬듯 자연스럽게
+    // ★ 절 번호는 읽지 않음
+    const from = Math.max(0, Math.min(startIdx, list.length - 1));
     const items = list
       .map((v, i) => ({ i, text: (v[ver] || "").trim() }))
-      .filter((x) => x.text && x.i >= Math.max(0, Math.min(startIdx, list.length - 1)));
+      .filter((x) => x.text && x.i >= from);
     if (!items.length) return;
 
     const picked = voices.find((v) => v.voiceURI === voiceURI) || null;
@@ -1167,6 +1194,21 @@ function BibleFinder({ openWeb }) {
     if (!picked) { setNoVoice(true); return; }
     setNoVoice(false);
 
+    // ★ 여러 절을 한 덩어리로 묶어 읽어서 뚝뚝 끊기지 않게 (약 220자 단위)
+    //   덩어리 안에서도 절이 바뀌는 지점을 표시해 하이라이트는 절 단위로 유지
+    const CHUNK = 220;
+    const chunks = [];
+    let cur = null;
+    for (const it of items) {
+      if (!cur || (cur.text.length + it.text.length > CHUNK)) {
+        cur = { text: it.text, startI: it.i, marks: [{ at: 0, i: it.i }] };
+        chunks.push(cur);
+      } else {
+        cur.marks.push({ at: cur.text.length + 1, i: it.i });
+        cur.text += " " + it.text;   // 절 사이를 공백으로만 이어 자연스럽게
+      }
+    }
+
     stopRef.current = true;
     synth.cancel();
     setCurIdx(-1);
@@ -1174,17 +1216,24 @@ function BibleFinder({ openWeb }) {
     // cancel 직후 바로 speak하면 크롬에서 씹히는 경우가 있어 살짝 텀을 둠
     setTimeout(() => {
       stopRef.current = false;
-      items.forEach((item, k) => {
-        const u = new SpeechSynthesisUtterance(item.text);
+      chunks.forEach((chunk, k) => {
+        const u = new SpeechSynthesisUtterance(chunk.text);
         u.lang = ver === "ko" ? "ko-KR" : "en-US";
         if (picked) u.voice = picked;
         // 한국어는 살짝 낮고 느리게(부드럽게), 영어는 원래 톤 그대로가 자연스러움
         u.rate = ver === "ko" ? rate * 0.95 : rate;
         u.pitch = ver === "ko" ? 0.95 : 1;
         u.volume = 1;
-        u.onstart = () => { setCurIdx(item.i); savePos(name, ch, item.i); };
+        u.onstart = () => { setCurIdx(chunk.startI); savePos(name, ch, chunk.startI); };
+        // 덩어리 안에서 절이 바뀌는 지점마다 하이라이트를 옮김
+        u.onboundary = (e) => {
+          const idx = e.charIndex || 0;
+          let now = chunk.marks[0].i;
+          for (const m of chunk.marks) { if (idx >= m.at) now = m.i; else break; }
+          setCurIdx(now);
+        };
         // ★ 끝까지 다 들었을 때만 읽기표에 체크 (중간에 멈추면 체크 안 함)
-        if (k === items.length - 1) u.onend = () => {
+        if (k === chunks.length - 1) u.onend = () => {
           setSpeaking(false);
           setCurIdx(-1);
           if (!stopRef.current) { clearPos(name, ch); markRead(name, ch); }
@@ -1462,7 +1511,7 @@ function QTLinks({ openWeb, items }) {
 }
 
 /* 프레임 안 웹뷰 */
-function WebView({ url, title, kind, onClose, note, setNote, done, dim, onComplete }) {
+function WebView({ url, title, kind, onClose, note, setNote, pub, setPub, done, dim, onComplete, dimKey }) {
   const embed = kind === "embed";
   const dateStr = new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
   const QUESTIONS = [
@@ -1471,6 +1520,15 @@ function WebView({ url, title, kind, onClose, note, setNote, done, dim, onComple
     "오늘 내 삶에 적용할 한 가지는?",
   ];
   const canWrite = !!setNote;
+  const [saved, setSaved] = useState(done);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    await onComplete(dimKey, note, pub);
+    setBusy(false);
+    setSaved(true);
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", justifyContent: "center", background: "rgba(0,0,0,.45)" }} onClick={onClose}>
@@ -1510,13 +1568,25 @@ function WebView({ url, title, kind, onClose, note, setNote, done, dim, onComple
               {canWrite && (
                 <>
                   <p style={{ margin: "0 0 7px", fontSize: 14, fontWeight: 700, color: T.ink }}>오늘의 후기</p>
-                  <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder={dim?.prompt || "오늘 받은 은혜를 적어보세요"}
+                  <textarea value={note} onChange={(e) => { setNote(e.target.value); if (saved) setSaved(false); }} rows={4} placeholder={dim?.prompt || "오늘 받은 은혜를 적어보세요"}
                     style={{ width: "100%", border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px 13px", fontSize: 14.5, lineHeight: 1.6, color: T.ink, outline: "none", resize: "none", background: "#fff", fontFamily: "inherit" }} />
-                  <button onClick={onComplete} disabled={done}
-                    style={{ width: "100%", padding: "13px 0", marginTop: 11, borderRadius: 12, fontSize: 16, fontWeight: 700, background: done ? T.sageSoft : (dim?.c || T.ink), color: done ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-                    {done ? <><Check size={16} /> 오늘 완료됨</> : <><PenLine size={15} /> 훈련 완료 · 일기 저장 · +{dim?.pts}P</>}
+
+                  {setPub && (
+                    <button onClick={() => { setPub((v) => !v); if (saved) setSaved(false); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, background: pub ? T.sageSoft : "#fff", border: `1px solid ${pub ? T.sage : T.line}`, borderRadius: 11, padding: "10px 12px", marginTop: 9, textAlign: "left" }}>
+                      <span style={{ width: 19, height: 19, borderRadius: 6, flexShrink: 0, background: pub ? T.sage : "#fff", border: `1px solid ${pub ? T.sage : T.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>{pub && <Check size={11} color="#fff" />}</span>
+                      <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: T.ink }}>{pub ? "함께 나눔에 공개" : "나만 보기 (비공개)"}</span>
+                      {pub ? <Users size={15} color={T.sage} /> : <Lock size={14} color={T.muted} />}
+                    </button>
+                  )}
+
+                  {/* ★ 저장만 — 창은 유지 */}
+                  <button onClick={save} disabled={busy}
+                    style={{ width: "100%", padding: "13px 0", marginTop: 11, borderRadius: 12, fontSize: 16, fontWeight: 700, background: saved ? T.sageSoft : (dim?.c || T.ink), color: saved ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                    {busy ? "저장 중…" : saved ? <><Check size={16} /> 저장됨 · 다시 저장</> : <><PenLine size={15} /> {done ? "후기 저장하기" : `훈련 완료 · 일기 저장 · +${dim?.pts}P`}</>}
                   </button>
-                  <p style={{ margin: "9px 2px 0", fontSize: 11.5, color: T.muted, textAlign: "center" }}>영상을 보고 바로 후기를 남길 수 있어요 ✦</p>
+                  <p style={{ margin: "9px 2px 0", fontSize: 11.5, color: saved ? T.sage : T.muted, textAlign: "center", fontWeight: saved ? 600 : 400 }}>
+                    {saved ? "신앙일기에 저장됐어요 ✦ 영상은 계속 볼 수 있어요" : "영상을 보면서 후기를 저장해도 창이 닫히지 않아요 ✦"}
+                  </p>
                 </>
               )}
             </div>
@@ -2596,6 +2666,281 @@ function Me({ user, profileComplete, authReady, points, signOut, isAdmin, dbCont
   );
 }
 
+
+/* 문의 · 제휴 보내기 */
+const INQ_KINDS = [
+  { k: "church", label: "우리 교회에 도입하고 싶어요" },
+  { k: "partner", label: "제휴 · 협업 제안" },
+  { k: "bug", label: "오류 신고" },
+  { k: "idea", label: "건의 · 아이디어" },
+  { k: "etc", label: "기타" },
+];
+
+function InquirySheet({ user, onClose }) {
+  const [kind, setKind] = useState("church");
+  const [name, setName] = useState(user?.name || "");
+  const [email, setEmail] = useState(user?.email || "");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
+
+  const send = async () => {
+    if (!body.trim()) { setErr("내용을 적어주세요."); return; }
+    if (!email.trim()) { setErr("답장 받으실 이메일을 적어주세요."); return; }
+    setBusy(true); setErr("");
+
+    const row = {
+      kind,
+      name: name.trim() || null,
+      email: email.trim(),
+      body: body.trim(),
+      user_id: user?.id || null,
+    };
+
+    // DB에 저장된 문의는 관리자 > 문의함에서 바로 확인해요 (메일 없이 앱 안에서 처리)
+    const { error } = await supabase.from("inquiries").insert(row);
+    if (error) { setErr("전송 실패: " + error.message); setBusy(false); return; }
+
+    setBusy(false); setDone(true);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(26,22,45,.5)", display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, background: T.paper, borderRadius: "20px 20px 0 0", padding: "18px 18px 28px", maxHeight: "88vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ flex: 1, fontSize: 17, fontWeight: 700, color: T.ink, fontFamily: serif }}>문의 · 제휴</span>
+          <button onClick={onClose}><X size={20} color={T.muted} /></button>
+        </div>
+
+        {done ? (
+          <div style={{ textAlign: "center", padding: "26px 10px" }}>
+            <div style={{ width: 52, height: 52, borderRadius: 999, background: T.sageSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+              <Check size={26} color={T.sage} />
+            </div>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>잘 전달됐어요</p>
+            <p style={{ margin: "6px 0 18px", fontSize: 13.5, color: T.muted, lineHeight: 1.6 }}>
+              적어주신 이메일로 답장드릴게요.<br />귀한 마음 감사합니다 🙏
+            </p>
+            <button onClick={onClose} style={{ width: "100%", padding: "13px 0", borderRadius: 11, background: T.ink, color: "#fff", fontSize: 14.5, fontWeight: 700 }}>닫기</button>
+          </div>
+        ) : (
+          <>
+            <p style={{ margin: "0 0 12px", fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+              다른 교회 도입, 제휴 제안, 오류 신고 무엇이든 좋아요. 확인하는 대로 답장드릴게요.
+            </p>
+
+            <p style={{ margin: "0 0 6px", fontSize: 12.5, fontWeight: 700, color: T.inkSoft }}>어떤 내용인가요?</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+              {INQ_KINDS.map((x) => (
+                <button key={x.k} onClick={() => setKind(x.k)}
+                  style={{ fontSize: 12, fontWeight: 700, padding: "7px 11px", borderRadius: 999,
+                    background: kind === x.k ? T.ink : T.card, color: kind === x.k ? "#fff" : T.muted,
+                    border: `1px solid ${kind === x.k ? T.ink : T.line}` }}>{x.label}</button>
+              ))}
+            </div>
+
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="성함 또는 교회 이름 (선택)"
+              style={{ width: "100%", boxSizing: "border-box", background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "13px", fontSize: 14.5, color: T.ink, marginBottom: 9, outline: "none" }} />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="답장 받으실 이메일"
+              style={{ width: "100%", boxSizing: "border-box", background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "13px", fontSize: 14.5, color: T.ink, marginBottom: 9, outline: "none" }} />
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6} placeholder="내용을 자유롭게 적어주세요."
+              style={{ width: "100%", boxSizing: "border-box", background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "13px", fontSize: 14.5, color: T.ink, lineHeight: 1.6, resize: "none", outline: "none", fontFamily: "inherit" }} />
+
+            {err && <p style={{ margin: "9px 0 0", fontSize: 12.5, color: T.rose }}>{err}</p>}
+
+            <button onClick={send} disabled={busy}
+              style={{ width: "100%", padding: "14px 0", marginTop: 13, borderRadius: 11, background: busy ? T.muted : T.gold, color: "#fff", fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <Send size={16} /> {busy ? "보내는 중…" : "보내기"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* 관리자 — 문의함 */
+function AdminInquiries() {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+
+  const load = async () => {
+    const { data, error } = await supabase.from("inquiries")
+      .select("*").order("created_at", { ascending: false });
+    if (error) { setErr(error.message); setRows([]); return; }
+    setErr(""); setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggleDone = async (r) => {
+    const v = !r.handled;
+    await supabase.from("inquiries").update({ handled: v }).eq("id", r.id);
+    setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, handled: v } : x)));
+  };
+
+  if (rows === null) return <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 30 }}>불러오는 중…</p>;
+  if (err) return (
+    <div style={{ background: `${T.rose}10`, border: `1px solid ${T.rose}44`, borderRadius: 12, padding: 14 }}>
+      <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.rose }}>문의함을 불러오지 못했어요</p>
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: T.inkSoft, lineHeight: 1.6 }}>Supabase에 <b>inquiries 테이블</b>과 관리자 조회 권한(RLS)이 있는지 확인해 주세요.</p>
+      <p style={{ margin: "8px 0 0", fontSize: 11, color: T.muted, wordBreak: "break-all" }}>{err}</p>
+    </div>
+  );
+
+  const open = rows.filter((r) => !r.handled);
+  const fmt = (d) => { const t = new Date(d); return `${t.getMonth() + 1}.${t.getDate()} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
+
+  return (
+    <>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {[{ n: rows.length, l: "전체 문의" }, { n: open.length, l: "미처리" }].map((s) => (
+          <div key={s.l} style={{ flex: 1, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px 8px", textAlign: "center" }}>
+            <p style={{ margin: 0, fontSize: 19, fontWeight: 700, color: s.l === "미처리" && s.n > 0 ? T.rose : T.ink, fontFamily: serif }}>{s.n}</p>
+            <p style={{ margin: "2px 0 0", fontSize: 11, color: T.muted }}>{s.l}</p>
+          </div>
+        ))}
+      </div>
+
+      {rows.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 24 }}>아직 들어온 문의가 없어요.</p>}
+
+      {rows.map((r) => (
+        <div key={r.id} style={{ background: T.card, borderRadius: 12, border: `1px solid ${r.handled ? T.line : `${T.gold}66`}`, padding: 13, marginBottom: 9, opacity: r.handled ? 0.6 : 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: T.goldDeep, background: T.goldSoft, borderRadius: 999, padding: "2px 8px" }}>
+              {INQ_KINDS.find((x) => x.k === r.kind)?.label || r.kind}
+            </span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: T.muted }}>{fmt(r.created_at)}</span>
+          </div>
+          <p style={{ margin: "0 0 3px", fontSize: 14, fontWeight: 700, color: T.ink }}>{r.name || "(이름 없음)"}</p>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: T.muted, wordBreak: "break-all" }}>{r.email}</p>
+          <p style={{ margin: "0 0 10px", fontSize: 13.5, color: T.inkSoft, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{r.body}</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <a href={`mailto:${r.email}?subject=${encodeURIComponent("[오늘의 빛] 문의 주셔서 감사합니다")}`}
+              style={{ fontSize: 12.5, fontWeight: 700, color: T.violet }}>메일로 답장</a>
+            <button onClick={() => toggleDone(r)} style={{ fontSize: 12.5, fontWeight: 700, color: r.handled ? T.muted : T.sage }}>
+              {r.handled ? "처리 취소" : "처리 완료"}
+            </button>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/* 관리자 — 회원 관리 */
+function AdminMembers() {
+  const [rows, setRows] = useState(null);
+  const [q, setQ] = useState("");
+  const [err, setErr] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const load = async () => {
+    const { data, error } = await supabase.from("profiles")
+      .select("id, nickname, church, email, points, faith_days, is_admin, is_blocked, created_at")
+      .order("created_at", { ascending: false });
+    if (error) { setErr(error.message); setRows([]); return; }
+    setErr(""); setRows(data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const patch = async (id, fields) => {
+    setBusyId(id);
+    const { error } = await supabase.from("profiles").update(fields).eq("id", id);
+    if (error) alert("수정 실패: " + error.message);
+    else setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...fields } : r)));
+    setBusyId(null);
+  };
+
+  if (rows === null) return <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 30 }}>회원 목록을 불러오는 중…</p>;
+
+  if (err) return (
+    <div style={{ background: `${T.rose}10`, border: `1px solid ${T.rose}44`, borderRadius: 12, padding: 14 }}>
+      <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.rose }}>회원 목록을 불러오지 못했어요</p>
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: T.inkSoft, lineHeight: 1.6 }}>
+        Supabase에서 <b>관리자 조회 권한(RLS 정책)</b>과 <b>profiles 테이블의 email · created_at · is_blocked 칸</b>이
+        설정되어 있는지 확인해 주세요.
+      </p>
+      <p style={{ margin: "8px 0 0", fontSize: 11, color: T.muted, wordBreak: "break-all" }}>{err}</p>
+    </div>
+  );
+
+  const now = Date.now();
+  const since = (d) => now - new Date(d || 0).getTime();
+  const newToday = rows.filter((r) => r.created_at && new Date(r.created_at).toDateString() === new Date().toDateString()).length;
+  const new7 = rows.filter((r) => r.created_at && since(r.created_at) < 7 * 864e5).length;
+
+  const kw = q.trim().toLowerCase();
+  const list = kw
+    ? rows.filter((r) => [r.nickname, r.church, r.email].some((x) => (x || "").toLowerCase().includes(kw)))
+    : rows;
+
+  const fmt = (d) => {
+    if (!d) return "가입일 없음";
+    const t = new Date(d);
+    return `${t.getFullYear()}.${String(t.getMonth() + 1).padStart(2, "0")}.${String(t.getDate()).padStart(2, "0")}`;
+  };
+
+  return (
+    <>
+      {/* 요약 */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {[
+          { n: rows.length, l: "전체 회원" },
+          { n: newToday, l: "오늘 가입" },
+          { n: new7, l: "최근 7일" },
+        ].map((s) => (
+          <div key={s.l} style={{ flex: 1, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px 8px", textAlign: "center" }}>
+            <p style={{ margin: 0, fontSize: 19, fontWeight: 700, color: T.ink, fontFamily: serif }}>{s.n}</p>
+            <p style={{ margin: "2px 0 0", fontSize: 11, color: T.muted }}>{s.l}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* 검색 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 7, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
+        <Search size={15} color={T.muted} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="닉네임 · 교회 · 이메일로 찾기"
+          style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 13.5, color: T.ink }} />
+        {q && <button onClick={() => setQ("")}><X size={14} color={T.muted} /></button>}
+      </div>
+
+      {list.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 24 }}>해당하는 회원이 없어요.</p>}
+
+      {list.map((r) => (
+        <div key={r.id} style={{ background: T.card, borderRadius: 12, border: `1px solid ${r.is_blocked ? `${T.rose}55` : T.line}`, padding: 13, marginBottom: 9, opacity: r.is_blocked ? 0.65 : 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+            <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{r.nickname || "(닉네임 없음)"}</p>
+            {r.is_admin && <span style={{ fontSize: 10, fontWeight: 700, color: T.violet, background: `${T.violet}18`, borderRadius: 999, padding: "2px 7px" }}>관리자</span>}
+            {r.is_blocked && <span style={{ fontSize: 10, fontWeight: 700, color: T.rose, background: `${T.rose}18`, borderRadius: 999, padding: "2px 7px" }}>차단됨</span>}
+            <span style={{ marginLeft: "auto", fontSize: 11, color: T.muted }}>{fmt(r.created_at)} 가입</span>
+          </div>
+
+          <p style={{ margin: "0 0 2px", fontSize: 12, color: T.muted, wordBreak: "break-all" }}>{r.email || "이메일 없음"}</p>
+          <p style={{ margin: "0 0 9px", fontSize: 12, color: T.muted }}>
+            {r.church || "교회 미입력"} · {r.points || 0}P · 성실한 날 {r.faith_days || 0}일
+          </p>
+
+          <div style={{ display: "flex", gap: 7 }}>
+            <button disabled={busyId === r.id} onClick={() => patch(r.id, { is_admin: !r.is_admin })}
+              style={{ fontSize: 12, fontWeight: 700, padding: "6px 10px", borderRadius: 8, color: r.is_admin ? T.muted : T.violet, border: `1px solid ${T.line}`, background: "transparent" }}>
+              {r.is_admin ? "관리자 해제" : "관리자 지정"}
+            </button>
+            <button disabled={busyId === r.id} onClick={() => {
+                if (!r.is_blocked && !confirm(`${r.nickname || "이 회원"}님을 차단할까요?`)) return;
+                patch(r.id, { is_blocked: !r.is_blocked });
+              }}
+              style={{ fontSize: 12, fontWeight: 700, padding: "6px 10px", borderRadius: 8, color: r.is_blocked ? T.sage : T.rose, border: `1px solid ${T.line}`, background: "transparent" }}>
+              {r.is_blocked ? "차단 해제" : "차단"}
+            </button>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/* 관리자 — 콘텐츠 관리 */
 function AdminPanel({ onClose, dbContents, dbVerses, reload }) {
   const CATS = [
     { key: "qt", label: "QT 영상" },
@@ -2610,6 +2955,7 @@ function AdminPanel({ onClose, dbContents, dbVerses, reload }) {
   const [vEdit, setVEdit] = useState(null);     // 구절 편집
   const [busy, setBusy] = useState(false);
   const isVerse = tab === "verse";
+  const isMember = tab === "member";
 
   const save = async (row) => {
     setBusy(true);
@@ -2641,12 +2987,12 @@ function AdminPanel({ onClose, dbContents, dbVerses, reload }) {
       <div style={{ width: "100%", maxWidth: 400, paddingBottom: 40 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: `1px solid ${T.line}`, position: "sticky", top: 0, background: T.paper, zIndex: 2 }}>
           <button onClick={onClose}><ChevronLeft size={22} color={T.ink} /></button>
-          <span style={{ flex: 1, fontSize: 16.5, fontWeight: 700, color: T.ink }}>콘텐츠 관리</span>
+          <span style={{ flex: 1, fontSize: 16.5, fontWeight: 700, color: T.ink }}>관리자</span>
           {busy && <span style={{ fontSize: 12, color: T.muted }}>저장 중…</span>}
         </div>
 
         <div style={{ display: "flex", gap: 6, padding: "12px 16px", overflowX: "auto" }}>
-          {[...CATS, { key: "verse", label: "암송 구절" }].map((c) => (
+          {[{ key: "inbox", label: "✉️ 문의함" }, { key: "member", label: "👤 회원 관리" }, ...CATS, { key: "verse", label: "암송 구절" }].map((c) => (
             <button key={c.key} onClick={() => { setTab(c.key); setEditing(null); setVEdit(null); }}
               style={{ whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 700, padding: "7px 12px", borderRadius: 999, flexShrink: 0,
                 background: tab === c.key ? T.ink : T.card, color: tab === c.key ? "#fff" : T.muted, border: `1px solid ${tab === c.key ? T.ink : T.line}` }}>{c.label}</button>
@@ -2654,7 +3000,7 @@ function AdminPanel({ onClose, dbContents, dbVerses, reload }) {
         </div>
 
         <div style={{ padding: "0 16px" }}>
-          {isVerse ? (
+          {tab === "inbox" ? <AdminInquiries /> : isMember ? <AdminMembers /> : isVerse ? (
             <>
               <button onClick={() => setVEdit({ ref: "", ref_en: "", ko: "", web: "", asv: "", sort_order: dbVerses.length + 1 })} style={{ width: "100%", padding: "12px 0", borderRadius: 11, background: T.gold, color: "#fff", fontSize: 14, fontWeight: 700, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><Plus size={16} /> 구절 추가</button>
               {dbVerses.length === 0 && <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>아직 등록된 구절이 없어요.<br />추가하면 앱의 오늘의 암송에 나와요.</p>}
@@ -2872,6 +3218,16 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
   const [safety, setSafety] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const [routineOpen, setRoutineOpen] = useState(false);
+  const [inqOpen, setInqOpen] = useState(false);
+  const [newInq, setNewInq] = useState(0);   // 안 읽은 문의 개수 (관리자 배지)
+  useEffect(() => {
+    if (!isAdmin) return;
+    (async () => {
+      const { count } = await supabase.from("inquiries")
+        .select("id", { count: "exact", head: true }).eq("handled", false);
+      if (typeof count === "number") setNewInq(count);
+    })();
+  }, [isAdmin, inqOpen]);
   const kakao = user.method === "kakao";
   return (
     <div>
@@ -2898,10 +3254,17 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
         </div>
         {isAdmin && (
           <button onClick={onAdmin} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: `linear-gradient(150deg, ${T.ink}, #3A335E)`, border: "none", borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
-            <div style={{ width: 40, height: 40, borderRadius: 11, background: "rgba(255,255,255,.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><PenLine size={20} color={T.gold} /></div>
+            <div style={{ position: "relative", flexShrink: 0 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: "rgba(255,255,255,.15)", display: "flex", alignItems: "center", justifyContent: "center" }}><PenLine size={20} color={T.gold} /></div>
+              {newInq > 0 && (
+                <span style={{ position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: T.rose, color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>{newInq}</span>
+              )}
+            </div>
             <div style={{ flex: 1 }}>
-              <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>콘텐츠 관리 (관리자)</p>
-              <p style={{ margin: "2px 0 0", fontSize: 13.5, color: "rgba(255,255,255,.7)" }}>QT·찬양·후원처·도서·구절 관리</p>
+              <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>관리자 페이지</p>
+              <p style={{ margin: "2px 0 0", fontSize: 13.5, color: "rgba(255,255,255,.7)" }}>
+                {newInq > 0 ? `새 문의 ${newInq}건 · 회원 · 콘텐츠 관리` : "문의 · 회원 · 콘텐츠 관리"}
+              </p>
             </div>
             <ChevronRight size={18} color={T.gold} />
           </button>
@@ -2930,8 +3293,17 @@ function Profile({ user, points, onOut, isAdmin, onAdmin, faithDays = 0 }) {
           </div>
           <ChevronRight size={18} color={T.muted} />
         </button>
+        <button onClick={() => setInqOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 15, marginBottom: 16, textAlign: "left" }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: `${T.sage}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Mail size={20} color={T.sage} /></div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>문의 · 제휴</p>
+            <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted }}>교회 도입 · 건의 · 오류 신고</p>
+          </div>
+          <ChevronRight size={18} color={T.muted} />
+        </button>
         <button onClick={onOut} style={{ width: "100%", padding: "12px 0", borderRadius: 11, fontSize: 14.5, fontWeight: 700, color: T.rose, background: T.card, border: `1px solid ${T.line}` }}>로그아웃</button>
       </div>
+      {inqOpen && <InquirySheet user={user} onClose={() => setInqOpen(false)} />}
       {routineOpen && <RoutineSheet onClose={() => setRoutineOpen(false)} />}
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
       {safety && <SafetySheet onClose={() => setSafety(false)} />}
