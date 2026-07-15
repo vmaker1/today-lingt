@@ -25,6 +25,7 @@ const sans = "'Noto Sans KR', sans-serif";
 
 /* 오늘의 신앙 훈련 — 아홉 가지 (pts: 완료 시 점수, 모두 10점) */
 const DIMS = [
+  { key: "mem", label: "암송", icon: Feather, c: T.gold, sub: "말씀을 마음에 새기기", prompt: "오늘 외운 구절과 느낀 점", pts: 10 },
   { key: "word", label: "말씀", icon: BookOpen, c: T.inkSoft, sub: "성경 본문 찾아 읽기", prompt: "오늘 읽은 본문과 마음에 남은 구절", pts: 10 },
   { key: "qt", label: "QT", icon: Coffee, c: T.violet, sub: "큐티 영상·묵상으로 하루 열기", prompt: "오늘 큐티에서 받은 은혜", pts: 10 },
   { key: "prayer", label: "기도", icon: HeartHandshake, c: T.rose, sub: "주님과 나누는 대화", prompt: "오늘의 기도제목·기도한 내용", pts: 10 },
@@ -33,7 +34,6 @@ const DIMS = [
   { key: "practice", label: "실천", icon: Footprints, c: T.sage, sub: "삶으로 살아내기", prompt: "오늘 실천한 사랑 한 가지", pts: 10 },
   { key: "mission", label: "구제·선교", icon: HandHeart, c: "#4E7CA1", sub: "이웃과 열방을 품기", prompt: "오늘 나눈 사랑·품은 기도", pts: 10 },
   { key: "growth", label: "신앙계발", icon: Sprout, c: T.olive, sub: "배우며 자라기", prompt: "오늘 배우고 자란 것", pts: 10 },
-  { key: "mem", label: "암송", icon: Feather, c: T.gold, sub: "말씀을 마음에 새기기", prompt: "오늘 외운 구절과 느낀 점", pts: 10 },
 ];
 const DIM = Object.fromEntries(DIMS.map((d) => [d.key, d]));
 
@@ -333,8 +333,9 @@ function useWeather() {
 
 const READING = { plan: "맥체인 통독", today: "창세기 12장 · 마태복음 11장" };
 
-/* 찬양 — 누르면 유튜브에서 감상 (검색 링크로 연결) */
+/* 찬양 — 앱 안에서 유튜브로 감상 (검색 결과를 앱 내 플레이어로 재생) */
 const ytSearch = (q) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+const ytEmbedSearch = (q) => `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(q)}`;
 const PRAISE = [
   { t: "주 은혜임을", a: "제이어스" },
   { t: "예배자", a: "어노인팅" },
@@ -542,6 +543,15 @@ export default function App() {
       setTodayPts(todayPtsCalc);
       setGoalHitToday(!!d?.goal_hit || todayPtsCalc >= (p?.daily_goal || DEFAULT_GOAL));
       setMemDone(todayDims.includes("mem") || !!d?.mem_done);
+
+      // 암송 연속일(streak)을 신앙일기의 'mem' 기록에서 직접 계산 → 새로고침해도 유지
+      const memDays = new Set(journalRows.filter((r) => r.dim === "mem").map((r) => r.day));
+      let streak = 0;
+      const cur = new Date(Date.now() + 9 * 3600e3); // 한국 오늘
+      // 오늘 안 했으면 어제부터 세기 시작 (오늘 하기 전이어도 어제까지의 연속은 유지)
+      if (!memDays.has(cur.toISOString().slice(0, 10))) cur.setDate(cur.getDate() - 1);
+      while (memDays.has(cur.toISOString().slice(0, 10))) { streak++; cur.setDate(cur.getDate() - 1); }
+      setMemStreak(streak);
 
       setLoaded(true);
     })();
@@ -983,15 +993,15 @@ function renderContent(key, { openWeb, byCat }) {
   if (key === "praise")
     return (
       <div style={{ display: "grid", gap: 8 }}>
-        <p style={{ margin: "0 0 2px", fontSize: 13.5, color: T.muted }}>곡을 누르면 유튜브에서 들을 수 있어요</p>
+        <p style={{ margin: "0 0 2px", fontSize: 13.5, color: T.muted }}>곡을 누르면 앱 안에서 바로 들을 수 있어요</p>
         {PRAISE.map((s) => (
-          <button key={s.t} onClick={() => openWeb(ytSearch(`${s.t} ${s.a}`), `${s.t} · ${s.a}`)} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", background: T.card, borderRadius: 12, padding: 10, border: `1px solid ${T.line}` }}>
+          <button key={s.t} onClick={() => openWeb(ytEmbedSearch(`${s.t} ${s.a}`), `${s.t} · ${s.a}`, "embed")} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", background: T.card, borderRadius: 12, padding: 10, border: `1px solid ${T.line}` }}>
             <div style={{ width: 36, height: 36, borderRadius: 9, background: `${T.teal}16`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Play size={15} color={T.teal} fill={T.teal} /></div>
             <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{s.t}</p><p style={{ margin: 0, fontSize: 13, color: T.muted }}>{s.a}</p></div>
-            <ExternalLink size={15} color={T.muted} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: T.teal, background: `${T.teal}18`, borderRadius: 999, padding: "2px 7px", flexShrink: 0 }}>앱 내 재생</span>
           </button>
         ))}
-        <p style={{ margin: "6px 2px 0", fontSize: 12, color: T.muted, lineHeight: 1.5 }}>* 유튜브는 광고가 있을 수 있어요. 정식 배포 땐 CCM 스트리밍 플레이리스트를 붙일 수 있어요.</p>
+        <p style={{ margin: "6px 2px 0", fontSize: 12, color: T.muted, lineHeight: 1.5 }}>* 유튜브 검색 결과의 첫 곡이 앱 안에서 재생돼요. 광고가 있을 수 있어요.</p>
       </div>
     );
   if (key === "worship")
