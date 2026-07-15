@@ -232,6 +232,18 @@ const BIBLE_VERSIONS = [
 /* 오늘 날짜 기준으로 구절 고르기 (매일 자동으로 바뀜) */
 const dayIndex = () => Math.floor((Date.now() + 9 * 3600e3) / 86400e3); // 한국 기준 일수
 const todayKey = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10); // YYYY-MM-DD (한국)
+
+/* "방금 · 3분 전 · 2시간 전 · 5일 전 · 3.14" 식으로 시간 표시 */
+function timeAgo(iso) {
+  if (!iso) return "방금";
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "방금";
+  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}일 전`;
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}.${d.getDate()}`;
+}
 const TODAY_VERSE = VERSES[dayIndex() % VERSES.length];
 
 /* 오늘 날씨 — Open-Meteo (무료 · API키 불필요 · 실제 데이터) */
@@ -388,40 +400,7 @@ const QT_LINKS = [
 ];
 
 /* 커뮤니티 — 아직 DB 연결 전. 지금은 샘플(데모) 화면이에요 */
-const SEED_POSTS = [
-  { id: 1, name: "김은혜", init: "은", time: "오늘 06:20", text: "새벽에 시편 143편으로 큐티했어요. 아침에 주의 인자를 듣게 해달라는 구절이 하루를 붙잡아 주네요.", amen: 12, amened: false },
-  { id: 2, name: "이믿음", init: "믿", time: "오늘 07:05", text: "요즘 마음이 무거웠는데 오늘 나눔 들으며 위로받았습니다. 함께 기도해 주세요 🙏", amen: 8, amened: false },
-  { id: 3, name: "박소망", init: "소", time: "어제 21:40", text: "감사 노트 3주째. 작은 것까지 세어보니 하루가 달라져요.", amen: 21, amened: false },
-];
-
 const AV = [T.gold, T.sage, T.rose, T.violet, T.teal, T.inkSoft];
-
-const SEED_ROOMS = [
-  { id: "r1", name: "새벽예배 동행", desc: "매일 새벽 함께 깨어 기도해요", members: 12, mine: true, unread: 0, feed: [
-    { id: 1, name: "김은혜", init: "은", c: T.gold, text: "오늘도 새벽에 눈이 떠졌어요. 함께라서 계속하게 되네요 🙏", time: "오늘 05:40" },
-    { id: 2, name: "박소망", init: "소", c: T.rose, text: "시편 143편 같이 읽는 중이에요. 은혜.", time: "오늘 05:55" },
-  ] },
-  { id: "r2", name: "중고등부 3반", desc: "우리 반 아이들과 선생님의 나눔방", members: 8, mine: true, unread: 0, feed: [
-    { id: 1, name: "이믿음", init: "믿", c: T.sage, text: "이번 주 암송 다 외웠어요 선생님!", time: "어제 21:10" },
-  ] },
-  { id: "r3", name: "말씀 통독 100일", desc: "100일 성경 통독 도전 공동체", members: 24, mine: false, unread: 0, feed: [
-    { id: 1, name: "정충성", init: "충", c: T.teal, text: "오늘 창세기 12장까지. 아브라함의 부르심이 마음에 남네요.", time: "오늘 07:20" },
-  ] },
-];
-
-const SEED_THREADS = [
-  { id: "t1", name: "김은혜", init: "은", c: T.gold, unread: 0, msgs: [
-    { me: false, text: "오늘 큐티 나눔 봤어요. 은혜였어요 🙏", time: "08:10" },
-    { me: false, text: "이번 주 새벽예배도 같이 가요!", time: "08:11" },
-  ] },
-  { id: "t2", name: "이믿음", init: "믿", c: T.sage, unread: 0, msgs: [
-    { me: true, text: "이번 주 암송 구절은 시편 143:8이에요~", time: "어제 20:00" },
-    { me: false, text: "넵 선생님! 외워볼게요", time: "어제 20:05" },
-  ] },
-  { id: "t3", name: "박소망", init: "소", c: T.rose, unread: 0, msgs: [
-    { me: false, text: "감사 노트 어떻게 쓰는지 알려줄 수 있어요?", time: "2일 전" },
-  ] },
-];
 
 const todayLabel = () => new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
 
@@ -436,7 +415,6 @@ export default function App() {
   const [todayPts, setTodayPts] = useState(0);   // 오늘 얻은 점수
   const [faithDays, setFaithDays] = useState(0); // 하루 60점 이상 달성한 날의 수
   const [goalHitToday, setGoalHitToday] = useState(false);
-  const [posts, setPosts] = useState(SEED_POSTS);
   const [toast, setToast] = useState(null);
 
   // Supabase 로그인 세션
@@ -495,8 +473,7 @@ export default function App() {
   const [memDone, setMemDone] = useState(false);
   const [memStreak, setMemStreak] = useState(0);
   const [sheet, setSheet] = useState(null); // 열린 훈련 key
-  const [rooms, setRooms] = useState(SEED_ROOMS);
-  const [threads, setThreads] = useState(SEED_THREADS);
+  const [dmUnread, setDmUnread] = useState(0); // 안 읽은 쪽지 수 (홈 종 배지)
 
   // 성령의 아홉 열매
   const [earnedFruits, setEarnedFruits] = useState([]);
@@ -545,6 +522,20 @@ export default function App() {
 
   // ── 루틴 알림 (앱이 열려 있을 때 정해진 시간에 알림) ──
   const uid = session?.user?.id;
+
+  // 안 읽은 쪽지 수 (홈 종 배지) — 진입 시 + 주기적으로 갱신
+  useEffect(() => {
+    if (!uid) { setDmUnread(0); return; }
+    const check = async () => {
+      const { count } = await supabase.from("dms").select("id", { count: "exact", head: true })
+        .eq("receiver", uid).eq("read", false);
+      if (typeof count === "number") setDmUnread(count);
+    };
+    check();
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
+  }, [uid, tab]);
+
   useEffect(() => {
     if (!uid || typeof window === "undefined" || typeof Notification === "undefined") return;
     let fired = {};
@@ -630,7 +621,7 @@ export default function App() {
   };
 
   const doneCount = DIMS.filter((d) => done7[d.key]).length;
-  const ctx = { tab, setTab, points, log, posts, setPosts, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, rooms, setRooms, threads, setThreads, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal };
+  const ctx = { tab, setTab, points, log, user, profileComplete, authReady, signOut, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet, completeDim, dmUnread, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal };
 
   if (recovery) return (
     <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
@@ -681,14 +672,12 @@ export default function App() {
    홈
 ────────────────────────────────────────────── */
 function Home(ctx) {
-  const { done7, doneCount, setSheet, memDone, memStreak, doMemorize, threads, rooms, setTab, verseToday, todayPts, dailyGoal, user } = ctx;
+  const { done7, doneCount, setSheet, memDone, memStreak, doMemorize, dmUnread, setTab, verseToday, todayPts, dailyGoal, user } = ctx;
   const weather = useWeather();      // 실제 날씨 (못 받아오면 표시 안 됨)
   const hour = new Date().getHours();
   const greet = hour < 11 ? "좋은 아침이에요" : hour < 18 ? "평안한 오후예요" : "고요한 저녁이에요";
 
-  const dmUnread = threads.reduce((n, t) => n + t.unread, 0);
-  const roomUnread = rooms.reduce((n, r) => n + (r.unread || 0), 0);
-  const notifCount = dmUnread + roomUnread;
+  const notifCount = dmUnread || 0;
   const [openNotif, setOpenNotif] = useState(false);
   const [openShare, setOpenShare] = useState(false);
 
@@ -754,7 +743,7 @@ function Home(ctx) {
         </div>
       </div>
 
-      {openNotif && <NotifSheet threads={threads} rooms={rooms} onClose={() => setOpenNotif(false)} onGo={() => { setOpenNotif(false); setTab("community"); }} />}
+      {openNotif && <NotifSheet onClose={() => setOpenNotif(false)} onGo={() => { setOpenNotif(false); setTab("community"); }} />}
       {openShare && <InviteSheet onClose={() => setOpenShare(false)} share />}
     </div>
   );
@@ -1776,7 +1765,16 @@ function Journal({ journal, done7, doneCount }) {
 function Community(ctx) {
   const [sub, setSub] = useState("feed");
   const [invite, setInvite] = useState(false);
-  const unread = ctx.threads.reduce((n, t) => n + t.unread, 0);
+  const [unread, setUnread] = useState(0);
+  useEffect(() => {
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      const id = u?.user?.id; if (!id) return;
+      const { count } = await supabase.from("dms").select("id", { count: "exact", head: true })
+        .eq("receiver", id).eq("read", false);
+      if (typeof count === "number") setUnread(count);
+    })();
+  }, [sub]);
   const tabs = [
     { k: "feed", label: "나눔" },
     { k: "rooms", label: "방" },
@@ -1803,18 +1801,10 @@ function Community(ctx) {
         ))}
       </div>
 
-      {/* 아직 DB 연결 전이라 샘플 화면임을 정직하게 알려줌 */}
-      <div style={{ margin: "10px 16px 0", display: "flex", alignItems: "center", gap: 7, background: `${T.gold}12`, border: `1px solid ${T.gold}44`, borderRadius: 10, padding: "8px 11px" }}>
-        <Sparkles size={13} color={T.goldDeep} style={{ flexShrink: 0 }} />
-        <span style={{ fontSize: 11.5, color: T.inkSoft, lineHeight: 1.5 }}>
-          <b>미리보기 화면이에요.</b> 아래 나눔·방·쪽지는 예시이고, 실제 지체들과의 연결은 곧 열려요.
-        </span>
-      </div>
-
       <div style={{ paddingTop: 12 }}>
-        {sub === "feed" && <Feed {...ctx} />}
-        {sub === "rooms" && <Rooms {...ctx} />}
-        {sub === "dm" && <Messages {...ctx} />}
+        {sub === "feed" && <Feed award={ctx.award} />}
+        {sub === "rooms" && <Rooms award={ctx.award} />}
+        {sub === "dm" && <Messages />}
       </div>
 
       {invite && <InviteSheet onClose={() => setInvite(false)} />}
@@ -1822,24 +1812,85 @@ function Community(ctx) {
   );
 }
 
-function Feed({ posts, setPosts, award }) {
+function Feed({ award }) {
+  const [posts, setPosts] = useState(null);
   const [text, setText] = useState("");
   const [writing, setWriting] = useState(false);
-  const post = () => {
-    if (!text.trim()) return;
-    setPosts((ps) => [{ id: Date.now(), name: "믿음", init: "믿", time: "방금", text: text.trim(), amen: 0, amened: false }, ...ps]);
-    setText(""); setWriting(false); award(10, "오늘의 나눔");
-  };
-  const amen = (id) => setPosts((ps) => ps.map((p) => { if (p.id !== id) return p; if (!p.amened) award(2, "아멘으로 격려"); return { ...p, amen: p.amened ? p.amen - 1 : p.amen + 1, amened: !p.amened }; }));
+  const [uid, setUid] = useState(null);
   const [reported, setReported] = useState(() => new Set());
-  const report = (id) => setReported((s) => new Set(s).add(id));
+
+  const AVC = [T.gold, T.sage, T.rose, T.inkSoft, T.violet, T.teal];
+  const initOf = (name) => (name || "?").trim()[0] || "?";
+
+  const load = async () => {
+    const { data: u } = await supabase.auth.getUser();
+    const id = u?.user?.id; setUid(id);
+
+    const { data: ps } = await supabase.from("posts")
+      .select("id, text, created_at, user_id").order("created_at", { ascending: false }).limit(100);
+    const list = ps || [];
+
+    // 작성자 닉네임
+    const ids = [...new Set(list.map((p) => p.user_id))];
+    let names = {};
+    if (ids.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, nickname").in("id", ids);
+      (profs || []).forEach((p) => { names[p.id] = p.nickname || "익명"; });
+    }
+    // 아멘 수 + 내가 눌렀는지
+    const { data: amens } = await supabase.from("post_amens").select("post_id, user_id");
+    const amenCount = {}, mine = new Set();
+    (amens || []).forEach((a) => {
+      amenCount[a.post_id] = (amenCount[a.post_id] || 0) + 1;
+      if (a.user_id === id) mine.add(a.post_id);
+    });
+
+    setPosts(list.map((p) => ({
+      ...p,
+      name: names[p.user_id] || "익명",
+      amen: amenCount[p.id] || 0,
+      amened: mine.has(p.id),
+    })));
+  };
+  useEffect(() => { load(); }, []);
+
+  const post = async () => {
+    if (!text.trim() || !uid) return;
+    const body = text.trim();
+    setText(""); setWriting(false);
+    const { error } = await supabase.from("posts").insert({ user_id: uid, text: body });
+    if (!error) { award(10, "오늘의 나눔"); load(); }
+  };
+
+  const amen = async (p) => {
+    if (!uid) return;
+    // 낙관적 업데이트
+    setPosts((ps) => ps.map((x) => x.id === p.id ? { ...x, amened: !x.amened, amen: x.amened ? x.amen - 1 : x.amen + 1 } : x));
+    if (p.amened) {
+      await supabase.from("post_amens").delete().eq("post_id", p.id).eq("user_id", uid);
+    } else {
+      await supabase.from("post_amens").insert({ post_id: p.id, user_id: uid });
+      award(2, "아멘으로 격려");
+    }
+  };
+
+  const del = async (p) => {
+    if (!confirm("이 나눔을 삭제할까요?")) return;
+    await supabase.from("posts").delete().eq("id", p.id);
+    setPosts((ps) => ps.filter((x) => x.id !== p.id));
+  };
+
+  const report = async (p) => {
+    setReported((s) => new Set(s).add(p.id));
+    if (uid) await supabase.from("reports").insert({ reporter: uid, target_type: "post", target_id: String(p.id) });
+  };
 
   return (
     <div>
       <div style={{ padding: "0 16px" }}>
         {!writing ? (
           <button onClick={() => setWriting(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 11, background: T.card, borderRadius: 14, padding: 13, border: `1px solid ${T.line}`, marginBottom: 16, textAlign: "left" }}>
-            <Avatar init="믿" c={T.gold} /><span style={{ flex: 1, color: T.muted, fontSize: 14.5 }}>오늘 어떤 은혜가 있었나요?</span><PenLine size={17} color={T.gold} />
+            <Avatar init="✦" c={T.gold} /><span style={{ flex: 1, color: T.muted, fontSize: 14.5 }}>오늘 어떤 은혜가 있었나요?</span><PenLine size={17} color={T.gold} />
           </button>
         ) : (
           <div style={{ background: T.card, borderRadius: 14, padding: 14, border: `1px solid ${T.gold}`, marginBottom: 16, animation: "rise .3s ease" }}>
@@ -1851,23 +1902,31 @@ function Feed({ posts, setPosts, award }) {
             </div>
           </div>
         )}
-        <div style={{ display: "grid", gap: 12, paddingBottom: 8 }}>
-          {posts.map((p) => (
-            <div key={p.id} style={{ background: T.card, borderRadius: 16, padding: 15, border: `1px solid ${T.line}`, boxShadow: "0 1px 6px rgba(32,42,68,.03)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <Avatar init={p.init} c={[T.gold, T.sage, T.rose, T.inkSoft][p.id % 4]} />
-                <div><p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{p.name}</p><p style={{ margin: 0, fontSize: 12, color: T.muted, display: "flex", alignItems: "center", gap: 4 }}><Clock size={10} /> {p.time}</p></div>
+
+        {posts === null ? (
+          <p style={{ fontSize: 13.5, color: T.muted, textAlign: "center", padding: 24 }}>나눔을 불러오는 중…</p>
+        ) : posts.length === 0 ? (
+          <Empty icon={MessageCircle} text={"아직 나눔이 없어요.\n첫 은혜를 나눠보세요."} />
+        ) : (
+          <div style={{ display: "grid", gap: 12, paddingBottom: 8 }}>
+            {posts.map((p, i) => (
+              <div key={p.id} style={{ background: T.card, borderRadius: 16, padding: 15, border: `1px solid ${T.line}`, boxShadow: "0 1px 6px rgba(32,42,68,.03)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <Avatar init={initOf(p.name)} c={AVC[i % AVC.length]} />
+                  <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{p.name}</p><p style={{ margin: 0, fontSize: 12, color: T.muted, display: "flex", alignItems: "center", gap: 4 }}><Clock size={10} /> {timeAgo(p.created_at)}</p></div>
+                  {p.user_id === uid && <button onClick={() => del(p)} style={{ fontSize: 12, color: T.muted }}>삭제</button>}
+                </div>
+                <p style={{ margin: "0 0 12px", fontSize: 15.5, lineHeight: 1.65, color: T.inkSoft, whiteSpace: "pre-wrap" }}>{p.text}</p>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <button onClick={() => amen(p)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: p.amened ? T.rose : T.muted }}><Heart size={15} fill={p.amened ? T.rose : "none"} color={p.amened ? T.rose : T.muted} /> 아멘 {p.amen}</button>
+                  {p.user_id !== uid && (reported.has(p.id)
+                    ? <span style={{ fontSize: 12, color: T.muted }}>신고 접수됨</span>
+                    : <button onClick={() => report(p)} style={{ fontSize: 12.5, color: T.muted, fontWeight: 500 }}>신고</button>)}
+                </div>
               </div>
-              <p style={{ margin: "0 0 12px", fontSize: 15.5, lineHeight: 1.65, color: T.inkSoft }}>{p.text}</p>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <button onClick={() => amen(p.id)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: p.amened ? T.rose : T.muted }}><Heart size={15} fill={p.amened ? T.rose : "none"} color={p.amened ? T.rose : T.muted} /> 아멘 {p.amen}</button>
-                {reported.has(p.id)
-                  ? <span style={{ fontSize: 12, color: T.muted }}>신고 접수됨</span>
-                  : <button onClick={() => report(p.id)} style={{ fontSize: 12.5, color: T.muted, fontWeight: 500 }}>신고</button>}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1883,6 +1942,7 @@ function Rooms({ award }) {
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState("all");        // all | mine
   const [loading, setLoading] = useState(true);
+  const [openRoom, setOpenRoom] = useState(null);
 
   const load = async () => {
     const { data: u } = await supabase.auth.getUser();
@@ -1931,6 +1991,11 @@ function Rooms({ award }) {
 
   const shown = tab === "mine" ? rooms.filter((r) => myStatus(r.id)) : rooms;
 
+  if (openRoom) {
+    const r = rooms.find((x) => x.id === openRoom);
+    if (r) return <RoomDetail room={r} uid={uid} award={award} onBack={() => setOpenRoom(null)} />;
+  }
+
   return (
     <div style={{ padding: "0 16px" }}>
       <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
@@ -1969,9 +2034,15 @@ function Rooms({ award }) {
                 </div>
 
                 {isOwner ? (
-                  <RoomManage room={r} onChanged={load} />
+                  <>
+                    <button onClick={() => setOpenRoom(r.id)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.ink, color: "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 8 }}><DoorOpen size={14} /> 방 들어가기</button>
+                    <RoomManage room={r} onChanged={load} />
+                  </>
                 ) : st === "member" ? (
-                  <button onClick={() => leave(r)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.sageSoft, color: T.sage, border: "none" }}>참여 중 · 나가기</button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setOpenRoom(r.id)} style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.ink, color: "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><DoorOpen size={14} /> 들어가기</button>
+                    <button onClick={() => leave(r)} style={{ padding: "10px 14px", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.sageSoft, color: T.sage, border: "none" }}>나가기</button>
+                  </div>
                 ) : st === "pending" ? (
                   <button onClick={() => leave(r)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13.5, fontWeight: 700, background: T.goldSoft, color: T.goldDeep, border: "none" }}>수락 대기 중 · 신청 취소</button>
                 ) : (
@@ -2070,13 +2141,36 @@ function NewRoom({ onClose, onCreate }) {
   );
 }
 
-function RoomDetail({ room, setRooms, award, onBack }) {
+function RoomDetail({ room, uid, award, onBack }) {
+  const [msgs, setMsgs] = useState(null);
   const [text, setText] = useState("");
-  const send = () => {
-    if (!text.trim()) return;
-    setRooms((rs) => rs.map((r) => r.id === room.id ? { ...r, feed: [{ id: Date.now(), name: "믿음", init: "믿", c: T.gold, text: text.trim(), time: "방금" }, ...r.feed] } : r));
-    setText(""); award(5, `${room.name}에 나눔`);
+  const [names, setNames] = useState({});
+  const boxRef = useRef(null);
+  const AVC = [T.gold, T.sage, T.rose, T.violet, T.teal, T.inkSoft];
+
+  const load = async () => {
+    const { data } = await supabase.from("room_messages")
+      .select("id, text, created_at, user_id").eq("room_id", room.id).order("created_at", { ascending: true }).limit(200);
+    const list = data || [];
+    const ids = [...new Set(list.map((m) => m.user_id))];
+    if (ids.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, nickname").in("id", ids);
+      const nm = {}; (profs || []).forEach((p) => { nm[p.id] = p.nickname || "익명"; }); setNames(nm);
+    }
+    setMsgs(list);
+    setTimeout(() => { if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight; }, 50);
   };
+  useEffect(() => { load(); }, [room.id]);
+
+  const send = async () => {
+    if (!text.trim() || !uid) return;
+    const body = text.trim(); setText("");
+    const { error } = await supabase.from("room_messages").insert({ room_id: room.id, user_id: uid, text: body });
+    if (!error) { award(5, `${room.name}에 나눔`); load(); }
+  };
+
+  const initOf = (id) => (names[id] || "?")[0] || "?";
+
   return (
     <div>
       <div style={{ padding: "0 16px 12px" }}>
@@ -2085,27 +2179,28 @@ function RoomDetail({ room, setRooms, award, onBack }) {
           <StarField faint />
           <div style={{ position: "relative", zIndex: 2 }}>
             <p style={{ margin: 0, fontFamily: serif, fontSize: 21, fontWeight: 700 }}>{room.name}</p>
-            <p style={{ margin: "3px 0 10px", fontSize: 13.5, opacity: .8 }}>{room.desc}</p>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13.5, background: "rgba(255,255,255,.14)", borderRadius: 999, padding: "3px 10px" }}><Users size={12} /> {room.members}명 참여</span>
+            {room.description && <p style={{ margin: "3px 0 0", fontSize: 13.5, opacity: .8 }}>{room.description}</p>}
           </div>
         </div>
       </div>
 
       <div style={{ padding: "0 16px" }}>
-        <div style={{ display: "flex", gap: 8, background: T.card, borderRadius: 14, padding: 11, border: `1px solid ${T.line}`, marginBottom: 14 }}>
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="이 방에 오늘의 은혜를 나눠요" style={{ flex: 1, border: "none", outline: "none", fontSize: 14.5, color: T.ink, background: "transparent" }} />
-          <button onClick={send} style={{ background: T.ink, color: "#fff", borderRadius: 999, padding: "0 14px", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}><Send size={13} /> 나눔</button>
-        </div>
-        <div style={{ display: "grid", gap: 11, paddingBottom: 8 }}>
-          {room.feed.length === 0 ? <Empty icon={DoorOpen} text={"아직 나눔이 없어요.\n첫 나눔을 남겨보세요."} /> : room.feed.map((p) => (
+        <div ref={boxRef} style={{ display: "grid", gap: 11, paddingBottom: 12, maxHeight: "52vh", overflowY: "auto" }}>
+          {msgs === null ? <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>불러오는 중…</p>
+            : msgs.length === 0 ? <Empty icon={DoorOpen} text={"아직 나눔이 없어요.\n첫 나눔을 남겨보세요."} />
+            : msgs.map((p, i) => (
             <div key={p.id} style={{ background: T.card, borderRadius: 14, padding: 14, border: `1px solid ${T.line}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-                <Avatar init={p.init} c={p.c} />
-                <div><p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink }}>{p.name}</p><p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{p.time}</p></div>
+                <Avatar init={initOf(p.user_id)} c={AVC[i % AVC.length]} />
+                <div><p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink }}>{names[p.user_id] || "익명"}</p><p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{timeAgo(p.created_at)}</p></div>
               </div>
-              <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: T.inkSoft }}>{p.text}</p>
+              <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: T.inkSoft, whiteSpace: "pre-wrap" }}>{p.text}</p>
             </div>
           ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, position: "sticky", bottom: 8, background: T.paper, paddingTop: 8 }}>
+          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="이 방에 오늘의 은혜를 나눠요" style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 999, padding: "11px 15px", fontSize: 14.5, color: T.ink, outline: "none", background: T.card }} />
+          <button onClick={send} style={{ width: 44, height: 44, borderRadius: 999, background: T.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Send size={17} /></button>
         </div>
       </div>
     </div>
@@ -2128,99 +2223,244 @@ function CreateRoomSheet({ onClose, onCreate }) {
 }
 
 /* ── 쪽지 (1:1) ── */
-function Messages({ threads, setThreads }) {
-  const [open, setOpen] = useState(null);
-  if (open) { const th = threads.find((t) => t.id === open); if (th) return <Thread thread={th} setThreads={setThreads} onBack={() => setOpen(null)} />; }
+function Messages() {
+  const [uid, setUid] = useState(null);
+  const [threads, setThreads] = useState(null);
+  const [open, setOpen] = useState(null);   // 상대 user_id
+  const [picking, setPicking] = useState(false);
+  const AVC = [T.gold, T.sage, T.rose, T.violet, T.teal];
+
+  const load = async () => {
+    const { data: u } = await supabase.auth.getUser();
+    const id = u?.user?.id; setUid(id);
+    if (!id) { setThreads([]); return; }
+
+    const { data: rows } = await supabase.from("dms")
+      .select("id, sender, receiver, text, read, created_at")
+      .or(`sender.eq.${id},receiver.eq.${id}`)
+      .order("created_at", { ascending: false }).limit(500);
+    const list = rows || [];
+
+    // 상대별로 묶기
+    const byPeer = {};
+    for (const m of list) {
+      const peer = m.sender === id ? m.receiver : m.sender;
+      if (!byPeer[peer]) byPeer[peer] = { peer, last: m, unread: 0 };
+      if (m.receiver === id && !m.read) byPeer[peer].unread += 1;
+    }
+    const peers = Object.keys(byPeer);
+    let names = {};
+    if (peers.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, nickname").in("id", peers);
+      (profs || []).forEach((p) => { names[p.id] = p.nickname || "익명"; });
+    }
+    setThreads(Object.values(byPeer).map((t) => ({ ...t, name: names[t.peer] || "익명" })));
+  };
+  useEffect(() => { load(); }, []);
+
+  if (open) return <Thread peer={open} me={uid} onBack={() => { setOpen(null); load(); }} />;
+  if (picking) return <PickUser me={uid} onPick={(pid) => { setPicking(false); setOpen(pid); }} onBack={() => setPicking(false)} />;
 
   return (
     <div style={{ padding: "0 16px" }}>
-      <div style={{ display: "grid", gap: 9, paddingBottom: 8 }}>
-        {threads.map((t) => {
-          const last = t.msgs[t.msgs.length - 1];
-          return (
-            <button key={t.id} onClick={() => { setOpen(t.id); setThreads((ts) => ts.map((x) => x.id === t.id ? { ...x, unread: 0 } : x)); }} style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 12, background: T.card, borderRadius: 14, padding: 13, border: `1px solid ${T.line}` }}>
-              <Avatar init={t.init} c={t.c} />
+      <button onClick={() => setPicking(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: T.card, border: `1px dashed ${T.gold}`, borderRadius: 14, padding: 13, marginBottom: 14, fontSize: 14.5, fontWeight: 700, color: T.goldDeep }}>
+        <PenLine size={15} /> 새 쪽지 보내기
+      </button>
+
+      {threads === null ? <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>불러오는 중…</p>
+        : threads.length === 0 ? <Empty icon={MessageCircle} text={"아직 주고받은 쪽지가 없어요.\n지체에게 먼저 인사를 건네보세요."} />
+        : (
+        <div style={{ display: "grid", gap: 9, paddingBottom: 8 }}>
+          {threads.map((t, i) => (
+            <button key={t.peer} onClick={() => setOpen(t.peer)} style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 12, background: T.card, borderRadius: 14, padding: 13, border: `1px solid ${T.line}` }}>
+              <Avatar init={(t.name || "?")[0]} c={AVC[i % AVC.length]} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ margin: 0, fontSize: 15.5, fontWeight: 700, color: T.ink }}>{t.name}</p>
-                <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{last.me ? "나 · " : ""}{last.text}</p>
+                <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.last.sender === uid ? "나 · " : ""}{t.last.text}</p>
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{last.time}</p>
-                {t.unread > 0 && <span style={{ display: "inline-block", marginTop: 4, minWidth: 17, height: 17, borderRadius: 999, background: T.rose, color: "#fff", fontSize: 11.5, fontWeight: 700, lineHeight: "17px" }}>{t.unread}</span>}
+                <p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{timeAgo(t.last.created_at)}</p>
+                {t.unread > 0 && <span style={{ display: "inline-block", marginTop: 4, minWidth: 17, height: 17, borderRadius: 999, background: T.rose, color: "#fff", fontSize: 11.5, fontWeight: 700, lineHeight: "17px", padding: "0 4px" }}>{t.unread}</span>}
               </div>
             </button>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Thread({ thread, setThreads, onBack }) {
-  const [text, setText] = useState("");
-  const [blocked, setBlocked] = useState(false);
-  const send = () => {
-    if (!text.trim()) return;
-    setThreads((ts) => ts.map((t) => t.id === thread.id ? { ...t, msgs: [...t.msgs, { me: true, text: text.trim(), time: "방금" }] } : t));
-    setText("");
+/* 쪽지 보낼 상대 고르기 */
+function PickUser({ me, onPick, onBack }) {
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState(null);
+
+  const search = async (kw) => {
+    setRows(null);
+    let query = supabase.from("profiles").select("id, nickname, church").neq("id", me).limit(20);
+    if (kw.trim()) query = query.ilike("nickname", `%${kw.trim()}%`);
+    const { data } = await query;
+    setRows(data || []);
   };
+  useEffect(() => { search(""); }, []);
+
+  return (
+    <div style={{ padding: "0 16px" }}>
+      <button onClick={onBack} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 14, color: T.muted, fontWeight: 500, marginBottom: 12 }}><ChevronLeft size={16} /> 쪽지함</button>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "9px 12px", marginBottom: 12 }}>
+        <Search size={15} color={T.muted} />
+        <input value={q} onChange={(e) => { setQ(e.target.value); search(e.target.value); }} placeholder="닉네임으로 지체 찾기" style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 14, color: T.ink }} />
+      </div>
+      {rows === null ? <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>찾는 중…</p>
+        : rows.length === 0 ? <Empty icon={User} text={"찾는 지체가 없어요."} />
+        : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {rows.map((p, i) => (
+            <button key={p.id} onClick={() => onPick(p.id)} style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 11, background: T.card, borderRadius: 12, padding: 12, border: `1px solid ${T.line}` }}>
+              <Avatar init={(p.nickname || "?")[0]} c={[T.gold, T.sage, T.rose, T.violet][i % 4]} />
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{p.nickname || "익명"}</p>
+                <p style={{ margin: 0, fontSize: 12, color: T.muted }}>{p.church || "교회 미입력"}</p>
+              </div>
+              <ChevronRight size={16} color={T.muted} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Thread({ peer, me, onBack }) {
+  const [msgs, setMsgs] = useState(null);
+  const [text, setText] = useState("");
+  const [name, setName] = useState("");
+  const [blocked, setBlocked] = useState(false);
+  const boxRef = useRef(null);
+
+  const load = async () => {
+    const { data: prof } = await supabase.from("profiles").select("nickname").eq("id", peer).single();
+    setName(prof?.nickname || "익명");
+
+    const { data } = await supabase.from("dms")
+      .select("id, sender, receiver, text, created_at")
+      .or(`and(sender.eq.${me},receiver.eq.${peer}),and(sender.eq.${peer},receiver.eq.${me})`)
+      .order("created_at", { ascending: true }).limit(300);
+    setMsgs(data || []);
+
+    // 받은 쪽지 읽음 처리
+    await supabase.from("dms").update({ read: true }).eq("sender", peer).eq("receiver", me).eq("read", false);
+
+    // 차단 상태
+    const { data: b } = await supabase.from("blocks").select("blocked").eq("blocker", me).eq("blocked", peer);
+    setBlocked((b || []).length > 0);
+
+    setTimeout(() => { if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight; }, 50);
+  };
+  useEffect(() => { load(); }, [peer]);
+
+  const send = async () => {
+    if (!text.trim() || blocked) return;
+    const body = text.trim(); setText("");
+    const { error } = await supabase.from("dms").insert({ sender: me, receiver: peer, text: body });
+    if (!error) load();
+  };
+
+  const toggleBlock = async () => {
+    if (blocked) { await supabase.from("blocks").delete().eq("blocker", me).eq("blocked", peer); setBlocked(false); }
+    else {
+      if (!confirm(`${name}님을 차단할까요? 더 이상 쪽지를 받지 않아요.`)) return;
+      await supabase.from("blocks").insert({ blocker: me, blocked: peer });
+      await supabase.from("reports").insert({ reporter: me, target_type: "dm", target_id: peer });
+      setBlocked(true);
+    }
+  };
+
   return (
     <div style={{ padding: "0 16px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, paddingBottom: 12, borderBottom: `1px solid ${T.line}`, marginBottom: 14 }}>
         <button onClick={onBack} style={{ padding: 2 }}><ChevronLeft size={22} color={T.muted} /></button>
-        <Avatar init={thread.init} c={thread.c} />
-        <p style={{ margin: 0, flex: 1, fontSize: 16.5, fontWeight: 700, color: T.ink }}>{thread.name}</p>
-        <button onClick={() => setBlocked((b) => !b)} style={{ fontSize: 12.5, fontWeight: 600, color: blocked ? T.sage : T.rose }}>{blocked ? "차단됨" : "신고·차단"}</button>
+        <Avatar init={(name || "?")[0]} c={T.violet} />
+        <p style={{ margin: 0, flex: 1, fontSize: 16.5, fontWeight: 700, color: T.ink }}>{name}</p>
+        <button onClick={toggleBlock} style={{ fontSize: 12.5, fontWeight: 600, color: blocked ? T.sage : T.rose }}>{blocked ? "차단 해제" : "신고·차단"}</button>
       </div>
 
-      {blocked && <div style={{ background: `${T.rose}0F`, borderRadius: 11, padding: "11px 13px", marginBottom: 14, fontSize: 12.5, color: T.ink, lineHeight: 1.6 }}>신고가 접수되고 이 사용자를 차단했어요. 더 이상 쪽지를 받지 않아요. <span style={{ color: T.muted }}>(배포 후 실제 적용)</span></div>}
+      {blocked && <div style={{ background: `${T.rose}0F`, borderRadius: 11, padding: "11px 13px", marginBottom: 14, fontSize: 12.5, color: T.ink, lineHeight: 1.6 }}>이 지체를 차단했어요. 차단을 해제하면 다시 쪽지를 보낼 수 있어요.</div>}
 
-      <div style={{ display: "grid", gap: 9, paddingBottom: 12 }}>
-        {thread.msgs.map((m, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: m.me ? "flex-end" : "flex-start" }}>
-            <div style={{ maxWidth: "75%" }}>
-              <div style={{ background: m.me ? T.ink : T.card, color: m.me ? "#fff" : T.ink, border: m.me ? "none" : `1px solid ${T.line}`, borderRadius: m.me ? "14px 14px 4px 14px" : "14px 14px 14px 4px", padding: "10px 13px", fontSize: 14.5, lineHeight: 1.55 }}>{m.text}</div>
-              <p style={{ margin: "3px 6px 0", fontSize: 11.5, color: T.muted, textAlign: m.me ? "right" : "left" }}>{m.time}</p>
+      <div ref={boxRef} style={{ display: "grid", gap: 9, paddingBottom: 12, maxHeight: "56vh", overflowY: "auto" }}>
+        {msgs === null ? <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>불러오는 중…</p>
+          : msgs.length === 0 ? <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 24 }}>첫 인사를 건네보세요 🙂</p>
+          : msgs.map((m) => {
+          const mine = m.sender === me;
+          return (
+            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+              <div style={{ maxWidth: "75%" }}>
+                <div style={{ background: mine ? T.ink : T.card, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: mine ? "14px 14px 4px 14px" : "14px 14px 14px 4px", padding: "10px 13px", fontSize: 14.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{m.text}</div>
+                <p style={{ margin: "3px 6px 0", fontSize: 11.5, color: T.muted, textAlign: mine ? "right" : "left" }}>{timeAgo(m.created_at)}</p>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <div style={{ display: "flex", gap: 8, position: "sticky", bottom: 8, background: T.paper, paddingTop: 6 }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="쪽지를 입력하세요" style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 999, padding: "11px 15px", fontSize: 14.5, color: T.ink, outline: "none", background: T.card }} />
-        <button onClick={send} style={{ width: 44, height: 44, borderRadius: 999, background: T.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Send size={17} /></button>
-      </div>
+      {!blocked && (
+        <div style={{ display: "flex", gap: 8, position: "sticky", bottom: 8, background: T.paper, paddingTop: 6 }}>
+          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="쪽지를 입력하세요" style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 999, padding: "11px 15px", fontSize: 14.5, color: T.ink, outline: "none", background: T.card }} />
+          <button onClick={send} style={{ width: 44, height: 44, borderRadius: 999, background: T.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Send size={17} /></button>
+        </div>
+      )}
     </div>
   );
 }
 
 /* ── 알림 ── */
-function NotifSheet({ threads, rooms, onClose, onGo }) {
-  const items = [
-    ...rooms.filter((r) => r.unread > 0).map((r) => ({ id: "r" + r.id, kind: "room", title: r.name, text: `새 나눔 ${r.unread}개가 올라왔어요`, icon: DoorOpen, c: T.violet })),
-    ...threads.filter((t) => t.unread > 0).map((t) => ({ id: "t" + t.id, kind: "dm", title: `${t.name}님의 쪽지`, text: t.msgs[t.msgs.length - 1].text, icon: MessageCircle, c: t.c })),
-  ];
+function NotifSheet({ onClose, onGo }) {
+  const [items, setItems] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      const id = u?.user?.id; if (!id) { setItems([]); return; }
+      const { data } = await supabase.from("dms")
+        .select("sender, text, created_at").eq("receiver", id).eq("read", false)
+        .order("created_at", { ascending: false });
+      const rows = data || [];
+      const senders = [...new Set(rows.map((r) => r.sender))];
+      let names = {};
+      if (senders.length) {
+        const { data: profs } = await supabase.from("profiles").select("id, nickname").in("id", senders);
+        (profs || []).forEach((p) => { names[p.id] = p.nickname || "익명"; });
+      }
+      // 상대별 최신 한 건씩
+      const seen = new Set(); const list = [];
+      for (const r of rows) {
+        if (seen.has(r.sender)) continue;
+        seen.add(r.sender);
+        list.push({ id: r.sender, title: `${names[r.sender] || "익명"}님의 쪽지`, text: r.text, time: r.created_at });
+      }
+      setItems(list);
+    })();
+  }, []);
+
   return (
     <Sheet onClose={onClose} accent={T.rose} title={<><Bell size={16} color={T.rose} /> 알림</>}>
-      {items.length === 0 ? (
+      {items === null ? (
+        <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 24 }}>불러오는 중…</p>
+      ) : items.length === 0 ? (
         <Empty icon={Bell} text={"새로운 알림이 없어요.\n지체들의 소식이 오면 여기에 표시돼요."} />
       ) : (
         <div style={{ display: "grid", gap: 9 }}>
-          <p style={{ margin: "0 0 2px", fontSize: 13.5, color: T.muted }}>읽지 않은 소식 {items.length}건</p>
-          {items.map((it) => {
-            const Ic = it.icon;
-            return (
-              <button key={it.id} onClick={onGo} style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 11, background: T.card, borderRadius: 13, padding: "12px 13px", border: `1px solid ${T.line}` }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: `${it.c}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ic size={17} color={it.c} /></div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{it.title}</p>
-                  <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.text}</p>
-                </div>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: it.kind === "room" ? T.violet : T.rose, background: it.kind === "room" ? `${T.violet}12` : `${T.rose}12`, borderRadius: 999, padding: "3px 8px", flexShrink: 0 }}>{it.kind === "room" ? "방" : "쪽지"}</span>
-              </button>
-            );
-          })}
-          <button onClick={onGo} style={{ width: "100%", marginTop: 4, padding: "12px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700, background: T.ink, color: "#fff" }}>함께 탭에서 보기</button>
+          <p style={{ margin: "0 0 2px", fontSize: 13.5, color: T.muted }}>읽지 않은 쪽지 {items.length}건</p>
+          {items.map((it) => (
+            <button key={it.id} onClick={onGo} style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 11, background: T.card, borderRadius: 13, padding: "12px 13px", border: `1px solid ${T.line}` }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: `${T.rose}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><MessageCircle size={17} color={T.rose} /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{it.title}</p>
+                <p style={{ margin: "2px 0 0", fontSize: 13.5, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.text}</p>
+              </div>
+              <span style={{ fontSize: 11.5, color: T.muted, flexShrink: 0 }}>{timeAgo(it.time)}</span>
+            </button>
+          ))}
+          <button onClick={onGo} style={{ width: "100%", marginTop: 4, padding: "12px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700, background: T.ink, color: "#fff" }}>쪽지함 열기</button>
         </div>
       )}
     </Sheet>
