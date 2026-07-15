@@ -23,16 +23,17 @@ const T = {
 const serif = "'Gowun Batang', serif";
 const sans = "'Noto Sans KR', sans-serif";
 
-/* 오늘의 신앙 훈련 — 여덟 가지 (pts: 완료 시 점수) */
+/* 오늘의 신앙 훈련 — 아홉 가지 (pts: 완료 시 점수, 모두 10점) */
 const DIMS = [
   { key: "word", label: "말씀", icon: BookOpen, c: T.inkSoft, sub: "성경 본문 찾아 읽기", prompt: "오늘 읽은 본문과 마음에 남은 구절", pts: 10 },
   { key: "qt", label: "QT", icon: Coffee, c: T.violet, sub: "큐티 영상·묵상으로 하루 열기", prompt: "오늘 큐티에서 받은 은혜", pts: 10 },
   { key: "prayer", label: "기도", icon: HeartHandshake, c: T.rose, sub: "주님과 나누는 대화", prompt: "오늘의 기도제목·기도한 내용", pts: 10 },
   { key: "praise", label: "찬양", icon: Music, c: T.teal, sub: "노래로 드리는 예배", prompt: "오늘 부르거나 들은 찬양과 마음", pts: 10 },
   { key: "worship", label: "예배", icon: Church, c: T.goldDeep, sub: "주님 앞에 나아가기", prompt: "예배·설교에서 받은 은혜", pts: 10 },
-  { key: "practice", label: "실천", icon: Footprints, c: T.sage, sub: "삶으로 살아내기", prompt: "오늘 실천한 사랑 한 가지", pts: 20 },
-  { key: "mission", label: "구제·선교", icon: HandHeart, c: "#4E7CA1", sub: "이웃과 열방을 품기", prompt: "오늘 나눈 사랑·품은 기도", pts: 20 },
+  { key: "practice", label: "실천", icon: Footprints, c: T.sage, sub: "삶으로 살아내기", prompt: "오늘 실천한 사랑 한 가지", pts: 10 },
+  { key: "mission", label: "구제·선교", icon: HandHeart, c: "#4E7CA1", sub: "이웃과 열방을 품기", prompt: "오늘 나눈 사랑·품은 기도", pts: 10 },
   { key: "growth", label: "신앙계발", icon: Sprout, c: T.olive, sub: "배우며 자라기", prompt: "오늘 배우고 자란 것", pts: 10 },
+  { key: "mem", label: "암송", icon: Feather, c: T.gold, sub: "말씀을 마음에 새기기", prompt: "오늘 외운 구절과 느낀 점", pts: 10 },
 ];
 const DIM = Object.fromEntries(DIMS.map((d) => [d.key, d]));
 
@@ -540,7 +541,7 @@ export default function App() {
       setDone7(Object.fromEntries(DIMS.map((x) => [x.key, todayDims.includes(x.key)])));
       setTodayPts(todayPtsCalc);
       setGoalHitToday(!!d?.goal_hit || todayPtsCalc >= (p?.daily_goal || DEFAULT_GOAL));
-      setMemDone(!!d?.mem_done);
+      setMemDone(todayDims.includes("mem") || !!d?.mem_done);
 
       setLoaded(true);
     })();
@@ -654,12 +655,21 @@ export default function App() {
     return true;
   };
 
-  const doMemorize = () => {
+  const doMemorize = async () => {
     if (!requireAuth("암송을 저장하려면 로그인이 필요해요")) return;
-    if (memDone) return;
+    if (memDone || done7.mem) return;
     setMemDone(true);
     setMemStreak((s) => s + 1);
-    award(5, "말씀 암송");
+    setDone7((d) => ({ ...d, mem: true }));   // 9번째 별로 표시
+    // 신앙일기에도 남겨 달력·기록에 반영 (하루+훈련당 하나)
+    const note = "오늘의 말씀을 마음에 새겼어요.";
+    setJournal((j) => {
+      const filtered = j.filter((e) => !(e.date === todayKey() && e.dim === "mem"));
+      return [{ id: Date.now(), date: todayKey(), dim: "mem", note, time: "방금", is_public: false }, ...filtered];
+    });
+    if (uid) await supabase.from("journal")
+      .upsert({ user_id: uid, day: todayKey(), dim: "mem", note, is_public: false }, { onConflict: "user_id,day,dim" });
+    award(DIM.mem.pts, "말씀 암송");
   };
 
   // 훈련 시트 열기 — 둘러보기는 가능하지만 완료(저장)는 로그인 필요
@@ -801,8 +811,8 @@ function Home(ctx) {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-          {DIMS.map((d, i) => {
-            const wide = DIMS.length % 2 === 1 && i === DIMS.length - 1;
+          {DIMS.filter((d) => d.key !== "mem").map((d, i, arr) => {
+            const wide = arr.length % 2 === 1 && i === arr.length - 1;
             return <TrainCard key={d.key} dim={d} done={done7[d.key]} wide={wide} onClick={() => setSheet(d.key)} />;
           })}
         </div>
@@ -852,7 +862,7 @@ function MemorizeCard({ verse, done, streak, onDone }) {
         <p style={{ fontFamily: serif, fontSize: ver === "ko" ? 18.5 : 16, lineHeight: 1.55, color: T.ink, margin: "0 0 4px" }}>"{text}"</p>
         <p style={{ margin: "0 0 12px", fontSize: 13.5, color: T.goldDeep, fontWeight: 700 }}>{ref}</p>
         <button onClick={() => setOpen(true)} disabled={done} style={{ width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 14.5, fontWeight: 700, background: done ? "rgba(95,132,104,.14)" : T.ink, color: done ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-          {done ? <><Check size={15} /> 오늘 암송 완료 · 🔥 {streak}일</> : <><Feather size={14} /> 암송 연습하기 · +5P</>}
+          {done ? <><Check size={15} /> 오늘 암송 완료 · 🔥 {streak}일</> : <><Feather size={14} /> 암송 연습하기 · +10P</>}
         </button>
       </div>
       {open && <MemorizeModal verse={{ text, ref }} done={done} onClose={() => setOpen(false)} onDone={() => { onDone(); setOpen(false); }} />}
@@ -888,7 +898,7 @@ function MemorizeModal({ verse, onClose, onDone, done }) {
       <div style={{ display: "flex", gap: 9 }}>
         <button onClick={() => setPeek(new Set())} style={{ width: 50, borderRadius: 11, background: T.card, border: `1px solid ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}><RotateCcw size={17} color={T.muted} /></button>
         <button onClick={onDone} disabled={done} style={{ flex: 1, padding: "13px 0", borderRadius: 11, fontSize: 16, fontWeight: 700, background: done ? T.sageSoft : T.gold, color: done ? T.sage : "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-          {done ? <><Check size={16} /> 오늘 암송 완료</> : <>다 외웠어요! · +5P</>}
+          {done ? <><Check size={16} /> 오늘 암송 완료</> : <>다 외웠어요! · +10P</>}
         </button>
       </div>
     </Sheet>
