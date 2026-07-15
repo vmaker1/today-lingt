@@ -1277,80 +1277,69 @@ function BibleFinder({ openWeb }) {
   // 구글 자연 음성으로 읽기 (Edge Function 'tts' 사용). 실패하면 무료 TTS로 폴백.
   const startSpeakGoogle = async (list, name, ch, startIdx = 0) => {
     const from = Math.max(0, Math.min(startIdx, list.length - 1));
-    // 절을 순서대로, 각 절의 시작 글자 위치를 기억하며 하나의 텍스트로 (하이라이트용)
+    // 절 단위로 재생해 하이라이트가 절을 정확히 따라가게 함
     const items = list.map((v, i) => ({ i, text: (v[ver] || "").trim() })).filter((x) => x.text && x.i >= from);
     if (!items.length) return;
-
-    // 구글 요청당 4800자 제한 → 절을 모아 블록으로 나눔 (블록 경계에 절 인덱스 기록)
-    const BLOCK = 3500;
-    const blocks = [];
-    let cur = null;
-    for (const it of items) {
-      if (!cur || cur.text.length + it.text.length > BLOCK) {
-        cur = { text: it.text, startI: it.i, marks: [{ at: 0, i: it.i }] };
-        blocks.push(cur);
-      } else {
-        cur.marks.push({ at: cur.text.length + 1, i: it.i });
-        cur.text += " " + it.text;
-      }
-    }
 
     gStopRef.current = false; stopRef.current = false;
     setSpeaking(true); setTtsLoading(true);
     setCurIdx(from);
 
     const langParam = ver === "ko" ? "ko" : "en";
-    // 언어 × 성별 음성 (구글 Neural2)
+    // 언어 × 성별 음성 (구글) — 낭독에 어울리는 톤으로 선별
     const VOICE_MAP = {
-      ko: { male: "ko-KR-Neural2-C", female: "ko-KR-Neural2-A" },
-      en: { male: "en-US-Neural2-D", female: "en-US-Neural2-F" },
+      ko: { male: "ko-KR-Neural2-C", female: "ko-KR-Wavenet-B" },
+      en: { male: "en-US-Neural2-J", female: "en-US-Neural2-H" },
     };
     const pickedVoice = VOICE_MAP[langParam]?.[gender] || undefined;
+    const speedRate = ver === "ko" ? rate * 0.96 : rate;
 
-    // 한 블록씩: 음성 받아서 재생 → 끝나면 다음 블록
-    const playBlock = async (k) => {
-      if (gStopRef.current || k >= blocks.length) return;
-      const block = blocks[k];
-      let audioB64 = null;
+    // 한 절의 음성(mp3 base64)을 받아옴 (다음 절 미리 받아두기용으로도 씀)
+    const fetchVerse = async (idx) => {
       try {
         const { data, error } = await supabase.functions.invoke("tts", {
-          body: { text: block.text, lang: langParam, voice: pickedVoice, rate: ver === "ko" ? rate * 0.96 : rate },
+          body: { text: items[idx].text, lang: langParam, voice: pickedVoice, rate: speedRate },
         });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
-        audioB64 = data?.audioContent || null;
-      } catch (e) {
-        // 구글 실패 → 무료 TTS로 폴백 (이 지점부터)
-        if (k === 0) {
-          setUseGoogle(false);
-          setTtsLoading(false);
-          startSpeak(list, name, ch, block.startI);   // 무료 엔진으로 전환
-          return;
-        }
-      }
+        if (error || data?.error) throw new Error(data?.error || "tts");
+        return data?.audioContent || null;
+      } catch (e) { return null; }
+    };
+
+    // 절을 순서대로 재생하되, 재생 중 다음 절을 미리 받아 끊김을 줄임
+    let nextPromise = fetchVerse(0);
+    const playFrom = async (idx) => {
+      if (gStopRef.current || idx >= items.length) return;
+      const b64 = await nextPromise;
       if (gStopRef.current) return;
-      if (!audioB64) { // 개별 블록 실패 시 다음 블록 시도
-        if (k < blocks.length - 1) return playBlock(k + 1);
-        setSpeaking(false); setCurIdx(-1); return;
+
+      // 첫 절부터 실패하면 무료 TTS로 폴백
+      if (!b64) {
+        if (idx === 0) { setUseGoogle(false); setTtsLoading(false); startSpeak(list, name, ch, items[0].i); return; }
+        // 중간 절 실패 → 건너뛰고 계속
+        nextPromise = (idx + 1 < items.length) ? fetchVerse(idx + 1) : Promise.resolve(null);
+        return playFrom(idx + 1);
       }
 
-      const audio = new Audio("data:audio/mp3;base64," + audioB64);
+      // 다음 절을 미리 요청해 둠 (현재 절 재생하는 동안 받아둠)
+      nextPromise = (idx + 1 < items.length) ? fetchVerse(idx + 1) : Promise.resolve(null);
+
+      const audio = new Audio("data:audio/mp3;base64," + b64);
       audioRef.current = audio;
       setTtsLoading(false);
-      setCurIdx(block.startI); savePos(name, ch, block.startI);
+      setCurIdx(items[idx].i); savePos(name, ch, items[idx].i);
       audio.onended = () => {
         if (gStopRef.current) return;
-        if (k < blocks.length - 1) playBlock(k + 1);
+        if (idx + 1 < items.length) playFrom(idx + 1);
         else { setSpeaking(false); setCurIdx(-1); clearPos(name, ch); markRead(name, ch); }
       };
       audio.onerror = () => {
         if (gStopRef.current) return;
-        if (k < blocks.length - 1) playBlock(k + 1);
+        if (idx + 1 < items.length) playFrom(idx + 1);
         else { setSpeaking(false); setCurIdx(-1); }
       };
       try { await audio.play(); } catch (e) { audio.onerror(); }
     };
-    playBlock(0);
+    playFrom(0);
   };
 
   // 재생 시작 진입점 — 구글 우선, 안 되면 무료
