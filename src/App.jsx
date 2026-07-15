@@ -666,7 +666,7 @@ export default function App() {
   const openSheet = (key) => setSheet(key);
 
   const doneCount = DIMS.filter((d) => done7[d.key]).length;
-  const ctx = { tab, setTab, points, log, user, profileComplete, authReady, signOut, requireAuth, award, done7, doneCount, journal, memDone, memStreak, doMemorize, sheet, setSheet: openSheet, completeDim, dmUnread, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal };
+  const ctx = { tab, setTab, points, log, user, uid, profileComplete, authReady, signOut, requireAuth, award, done7, doneCount, journal, setJournal, memDone, memStreak, doMemorize, sheet, setSheet: openSheet, completeDim, dmUnread, earnedFruits, growingFruit, growStep, selectFruit, growAction, harvestFruit, isAdmin, dbContents, dbVerses, byCat, verseToday, loadContents, todayPts, faithDays, goalHitToday, dailyGoal, setDailyGoal };
 
   if (recovery) return (
     <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
@@ -1678,12 +1678,28 @@ function InfoLine({ icon: Icon, text, c = T.inkSoft }) {
 /* ─────────────────────────────────────────────
    신앙일기
 ────────────────────────────────────────────── */
-function Journal({ journal: rawJournal, done7, doneCount }) {
+function Journal({ journal: rawJournal, done7, doneCount, setJournal, uid }) {
   const [mode, setMode] = useState("cal");     // cal(달력) | list(목록)
   const [pickDay, setPickDay] = useState(null); // 선택한 날짜
   const [filter, setFilter] = useState(null);   // 훈련 필터
   const [q, setQ] = useState("");               // 검색어
   const [month, setMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [editing, setEditing] = useState(null); // 수정 중인 일기 id
+  const [editText, setEditText] = useState("");
+
+  // 일기 수정 저장
+  const saveEdit = async (e) => {
+    const text = editText.trim();
+    setEditing(null);
+    setJournal((list) => list.map((x) => x.id === e.id ? { ...x, note: text } : x));
+    if (uid) await supabase.from("journal").update({ note: text }).eq("id", e.id);
+  };
+  // 일기 삭제
+  const removeEntry = async (e) => {
+    if (!confirm("이 기록을 삭제할까요? 점수는 그대로 유지돼요.")) return;
+    setJournal((list) => list.filter((x) => x.id !== e.id));
+    if (uid) await supabase.from("journal").delete().eq("id", e.id);
+  };
 
   // 하루+훈련당 하나만 남기기 (예전 중복 데이터도 화면에선 최신 하나로)
   const journal = useMemo(() => {
@@ -1818,14 +1834,35 @@ function Journal({ journal: rawJournal, done7, doneCount }) {
               <div style={{ display: "grid", gap: 9 }}>
                 {entries.map((e) => {
                   const d = DIM[e.dim]; if (!d) return null; const Ic = d.icon;
+                  const isEditing = editing === e.id;
                   return (
-                    <div key={e.id} style={{ background: T.card, borderRadius: 13, padding: "12px 14px", border: `1px solid ${T.line}`, borderLeft: `3px solid ${d.c}` }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: e.note ? 7 : 0 }}>
+                    <div key={e.id} style={{ background: T.card, borderRadius: 13, padding: "12px 14px", border: `1px solid ${isEditing ? d.c : T.line}`, borderLeft: `3px solid ${d.c}` }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: d.c }}><Ic size={14} /> {d.label}</span>
-                        <span style={{ fontSize: 12, color: T.muted }}>{e.time}</span>
+                        {isEditing ? (
+                          <span style={{ fontSize: 12, color: T.muted }}>수정 중</span>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ fontSize: 12, color: T.muted }}>{e.time}</span>
+                            <button onClick={() => { setEditing(e.id); setEditText(e.note || ""); }} title="수정" style={{ display: "inline-flex", padding: 2 }}><PenLine size={14} color={T.muted} /></button>
+                            <button onClick={() => removeEntry(e)} title="삭제" style={{ display: "inline-flex", padding: 2 }}><X size={15} color={T.muted} /></button>
+                          </div>
+                        )}
                       </div>
-                      {e.note ? <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.65, color: T.inkSoft }}>{e.note}</p>
-                        : <p style={{ margin: 0, fontSize: 14, color: T.muted, fontStyle: "italic" }}>후기 없이 완료</p>}
+                      {isEditing ? (
+                        <div>
+                          <textarea value={editText} onChange={(ev) => setEditText(ev.target.value)} autoFocus rows={3} placeholder="후기를 적어보세요"
+                            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px", fontSize: 14.5, lineHeight: 1.6, color: T.ink, outline: "none", resize: "none", background: T.paper, fontFamily: "inherit" }} />
+                          <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+                            <button onClick={() => setEditing(null)} style={{ fontSize: 13, fontWeight: 700, color: T.muted, padding: "7px 12px" }}>취소</button>
+                            <button onClick={() => saveEdit(e)} style={{ fontSize: 13, fontWeight: 700, color: "#fff", background: T.ink, borderRadius: 8, padding: "7px 14px" }}>저장</button>
+                          </div>
+                        </div>
+                      ) : e.note ? (
+                        <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.65, color: T.inkSoft, whiteSpace: "pre-wrap" }}>{e.note}</p>
+                      ) : (
+                        <p style={{ margin: 0, fontSize: 14, color: T.muted, fontStyle: "italic" }}>후기 없이 완료</p>
+                      )}
                     </div>
                   );
                 })}
