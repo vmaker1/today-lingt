@@ -434,11 +434,17 @@ export default function App() {
   const user = session ? {
     id: session.user.id,
     email: session.user.email,
-    name: session.user.user_metadata?.nickname || "",
+    // 이메일 가입은 nickname, 카카오는 user_metadata에 name/nickname/full_name 형태로 들어옴
+    name: session.user.user_metadata?.nickname
+       || session.user.user_metadata?.name
+       || session.user.user_metadata?.full_name
+       || "",
+    kakaoName: session.user.user_metadata?.name || session.user.user_metadata?.full_name || "",
     church: session.user.user_metadata?.church || "미입력",
     method: session.user.app_metadata?.provider === "kakao" ? "kakao" : "email",
   } : null;
-  const profileComplete = !!(user && user.name);
+  // 닉네임을 아직 우리 앱에서 정하지 않았으면(=커뮤니티 규칙 동의 전) 프로필 설정을 거치게 함
+  const profileComplete = !!(user && session.user.user_metadata?.nickname);
   const signOut = () => supabase.auth.signOut();
 
   // 관리자 여부 + DB 콘텐츠
@@ -646,11 +652,15 @@ export default function App() {
 
       <div style={{ width: "100%", maxWidth: 400, minHeight: "100vh", background: T.paper, position: "relative", boxShadow: "0 0 60px rgba(32,42,68,.15)", display: "flex", flexDirection: "column" }}>
         <div style={{ flex: 1, overflowY: "auto", paddingBottom: 84 }}>
-          {tab === "home" && <Home {...ctx} />}
-          {tab === "journal" && <Journal {...ctx} />}
-          {tab === "community" && <Community {...ctx} />}
-          {tab === "points" && <Points {...ctx} />}
-          {tab === "me" && <Me {...ctx} />}
+          {!profileComplete ? <ProfileSetup user={user} /> : (
+            <>
+              {tab === "home" && <Home {...ctx} />}
+              {tab === "journal" && <Journal {...ctx} />}
+              {tab === "community" && <Community {...ctx} />}
+              {tab === "points" && <Points {...ctx} />}
+              {tab === "me" && <Me {...ctx} />}
+            </>
+          )}
         </div>
 
         {sheet && <TrainSheet dimKey={sheet} done={done7[sheet]} onClose={() => setSheet(null)} onComplete={completeDim} byCat={byCat} verseToday={verseToday} />}
@@ -2142,34 +2152,62 @@ function NewRoom({ onClose, onCreate }) {
 }
 
 function RoomDetail({ room, uid, award, onBack }) {
+  const [view, setView] = useState("chat");   // chat | members | board
   const [msgs, setMsgs] = useState(null);
   const [text, setText] = useState("");
   const [names, setNames] = useState({});
+  const [members, setMembers] = useState([]);   // [{user_id, nickname, church}]
+  const [presence, setPresence] = useState({}); // user_id -> last_seen(ms)
   const boxRef = useRef(null);
   const AVC = [T.gold, T.sage, T.rose, T.violet, T.teal, T.inkSoft];
+  const initOf = (id) => (names[id] || "?")[0] || "?";
 
-  const load = async () => {
+  // 멤버 목록 + 닉네임
+  const loadMembers = async () => {
+    const { data: ms } = await supabase.from("room_members")
+      .select("user_id, role").eq("room_id", room.id).eq("status", "member");
+    const ids = (ms || []).map((m) => m.user_id);
+    let nm = {};
+    if (ids.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, nickname, church").in("id", ids);
+      const byId = {}; (profs || []).forEach((p) => { nm[p.id] = p.nickname || "익명"; byId[p.id] = p; });
+      setMembers((ms || []).map((m) => ({ ...m, ...(byId[m.user_id] || {}) })));
+    } else setMembers([]);
+    setNames((prev) => ({ ...prev, ...nm }));
+  };
+
+  const loadMsgs = async () => {
     const { data } = await supabase.from("room_messages")
       .select("id, text, created_at, user_id").eq("room_id", room.id).order("created_at", { ascending: true }).limit(200);
-    const list = data || [];
-    const ids = [...new Set(list.map((m) => m.user_id))];
-    if (ids.length) {
-      const { data: profs } = await supabase.from("profiles").select("id, nickname").in("id", ids);
-      const nm = {}; (profs || []).forEach((p) => { nm[p.id] = p.nickname || "익명"; }); setNames(nm);
-    }
-    setMsgs(list);
+    setMsgs(data || []);
     setTimeout(() => { if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight; }, 50);
   };
-  useEffect(() => { load(); }, [room.id]);
+
+  // 재실(라이브) 하트비트: 들어와 있는 동안 20초마다 갱신
+  useEffect(() => {
+    if (!uid) return;
+    const beat = async () => {
+      await supabase.from("room_presence").upsert({ room_id: room.id, user_id: uid, last_seen: new Date().toISOString() });
+      const { data } = await supabase.from("room_presence").select("user_id, last_seen").eq("room_id", room.id);
+      const p = {}; (data || []).forEach((r) => { p[r.user_id] = new Date(r.last_seen).getTime(); });
+      setPresence(p);
+    };
+    beat();
+    const t = setInterval(beat, 20000);
+    return () => clearInterval(t);
+  }, [room.id, uid]);
+
+  useEffect(() => { loadMembers(); loadMsgs(); }, [room.id]);
 
   const send = async () => {
     if (!text.trim() || !uid) return;
     const body = text.trim(); setText("");
     const { error } = await supabase.from("room_messages").insert({ room_id: room.id, user_id: uid, text: body });
-    if (!error) { award(5, `${room.name}에 나눔`); load(); }
+    if (!error) { award(5, `${room.name}에 나눔`); loadMsgs(); }
   };
 
-  const initOf = (id) => (names[id] || "?")[0] || "?";
+  const isLive = (id) => presence[id] && (Date.now() - presence[id] < 60000); // 1분 내 활동 = 라이브
+  const liveCount = members.filter((m) => isLive(m.user_id)).length;
 
   return (
     <div>
@@ -2179,30 +2217,182 @@ function RoomDetail({ room, uid, award, onBack }) {
           <StarField faint />
           <div style={{ position: "relative", zIndex: 2 }}>
             <p style={{ margin: 0, fontFamily: serif, fontSize: 21, fontWeight: 700 }}>{room.name}</p>
-            {room.description && <p style={{ margin: "3px 0 0", fontSize: 13.5, opacity: .8 }}>{room.description}</p>}
+            {room.description && <p style={{ margin: "3px 0 8px", fontSize: 13.5, opacity: .8 }}>{room.description}</p>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12.5, background: "rgba(255,255,255,.14)", borderRadius: 999, padding: "3px 10px" }}><Users size={12} /> {members.length}명</span>
+              {liveCount > 0 && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, background: "rgba(126,217,159,.22)", borderRadius: 999, padding: "3px 10px" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 999, background: "#7ED99F", animation: "glow 1.4s ease-in-out infinite" }} /> 지금 {liveCount}명 접속 중
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      <div style={{ padding: "0 16px" }}>
-        <div ref={boxRef} style={{ display: "grid", gap: 11, paddingBottom: 12, maxHeight: "52vh", overflowY: "auto" }}>
-          {msgs === null ? <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>불러오는 중…</p>
-            : msgs.length === 0 ? <Empty icon={DoorOpen} text={"아직 나눔이 없어요.\n첫 나눔을 남겨보세요."} />
-            : msgs.map((p, i) => (
-            <div key={p.id} style={{ background: T.card, borderRadius: 14, padding: 14, border: `1px solid ${T.line}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-                <Avatar init={initOf(p.user_id)} c={AVC[i % AVC.length]} />
-                <div><p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink }}>{names[p.user_id] || "익명"}</p><p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{timeAgo(p.created_at)}</p></div>
-              </div>
-              <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: T.inkSoft, whiteSpace: "pre-wrap" }}>{p.text}</p>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8, position: "sticky", bottom: 8, background: T.paper, paddingTop: 8 }}>
-          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="이 방에 오늘의 은혜를 나눠요" style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 999, padding: "11px 15px", fontSize: 14.5, color: T.ink, outline: "none", background: T.card }} />
-          <button onClick={send} style={{ width: 44, height: 44, borderRadius: 999, background: T.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Send size={17} /></button>
-        </div>
+      {/* 방 안 탭 */}
+      <div style={{ display: "flex", gap: 6, padding: "0 16px 10px" }}>
+        {[["chat", "나눔"], ["members", "멤버"], ["board", "인증 현황"]].map(([k, l]) => (
+          <button key={k} onClick={() => setView(k)} style={{ flex: 1, padding: "8px 0", borderRadius: 999, fontSize: 13.5, fontWeight: 700, background: view === k ? T.ink : T.card, color: view === k ? "#fff" : T.muted, border: `1px solid ${view === k ? T.ink : T.line}` }}>{l}</button>
+        ))}
       </div>
+
+      <div style={{ padding: "0 16px" }}>
+        {view === "chat" && (
+          <>
+            <div ref={boxRef} style={{ display: "grid", gap: 11, paddingBottom: 12, maxHeight: "48vh", overflowY: "auto" }}>
+              {msgs === null ? <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 20 }}>불러오는 중…</p>
+                : msgs.length === 0 ? <Empty icon={DoorOpen} text={"아직 나눔이 없어요.\n첫 나눔을 남겨보세요."} />
+                : msgs.map((p, i) => (
+                <div key={p.id} style={{ background: T.card, borderRadius: 14, padding: 14, border: `1px solid ${T.line}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+                    <Avatar init={initOf(p.user_id)} c={AVC[i % AVC.length]} />
+                    <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink }}>{names[p.user_id] || "익명"}{isLive(p.user_id) && <span style={{ marginLeft: 6, fontSize: 10.5, color: T.sage, fontWeight: 700 }}>● 접속 중</span>}</p><p style={{ margin: 0, fontSize: 11.5, color: T.muted }}>{timeAgo(p.created_at)}</p></div>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: T.inkSoft, whiteSpace: "pre-wrap" }}>{p.text}</p>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, position: "sticky", bottom: 8, background: T.paper, paddingTop: 8 }}>
+              <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="이 방에 오늘의 은혜를 나눠요" style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 999, padding: "11px 15px", fontSize: 14.5, color: T.ink, outline: "none", background: T.card }} />
+              <button onClick={send} style={{ width: 44, height: 44, borderRadius: 999, background: T.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Send size={17} /></button>
+            </div>
+          </>
+        )}
+
+        {view === "members" && (
+          <div style={{ display: "grid", gap: 9, paddingBottom: 8 }}>
+            <p style={{ margin: "0 0 2px", fontSize: 12.5, color: T.muted }}>함께하는 지체 {members.length}명 {liveCount > 0 && `· 접속 중 ${liveCount}명`}</p>
+            {members.map((m, i) => (
+              <div key={m.user_id} style={{ display: "flex", alignItems: "center", gap: 11, background: T.card, borderRadius: 13, padding: 12, border: `1px solid ${T.line}` }}>
+                <div style={{ position: "relative" }}>
+                  <Avatar init={(m.nickname || "?")[0]} c={AVC[i % AVC.length]} />
+                  {isLive(m.user_id) && <span style={{ position: "absolute", bottom: -1, right: -1, width: 11, height: 11, borderRadius: 999, background: "#7ED99F", border: "2px solid #fff" }} />}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={{ margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink }}>{m.nickname || "익명"}{m.role === "owner" && <span style={{ marginLeft: 6, fontSize: 10.5, color: T.goldDeep, background: T.goldSoft, borderRadius: 999, padding: "1px 7px" }}>방장</span>}</p>
+                  <p style={{ margin: "1px 0 0", fontSize: 12, color: T.muted }}>{isLive(m.user_id) ? <span style={{ color: T.sage, fontWeight: 600 }}>지금 접속 중</span> : (m.church || "교회 미입력")}</p>
+                </div>
+                {m.user_id !== uid && <button onClick={() => { /* 프로필/쪽지 연결 여지 */ }} style={{ fontSize: 12, color: T.muted }}></button>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {view === "board" && <RoomBoard room={room} members={members} names={names} />}
+      </div>
+    </div>
+  );
+}
+
+/* 방 인증 현황 — 달력 + 기간별 점수 (순위 없음) */
+function RoomBoard({ room, members, names }) {
+  const [logs, setLogs] = useState(null);   // [{user_id, day, today_pts, goal_hit}]
+  const [range, setRange] = useState(7);    // 7 | 30 | 0(이번 달)
+
+  useEffect(() => {
+    (async () => {
+      const ids = members.map((m) => m.user_id);
+      if (!ids.length) { setLogs([]); return; }
+      const { data } = await supabase.from("daily_logs")
+        .select("user_id, day, today_pts, goal_hit").in("user_id", ids)
+        .order("day", { ascending: false }).limit(2000);
+      setLogs(data || []);
+    })();
+  }, [members]);
+
+  if (logs === null) return <p style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: 24 }}>인증 현황을 불러오는 중…</p>;
+
+  // 기간 범위 계산
+  const now = new Date();
+  const kstToday = todayKey();
+  let fromDay;
+  if (range === 0) { fromDay = kstToday.slice(0, 8) + "01"; }      // 이번 달 1일
+  else { const d = new Date(Date.now() + 9 * 3600e3); d.setDate(d.getDate() - (range - 1)); fromDay = d.toISOString().slice(0, 10); }
+
+  const inRange = logs.filter((l) => l.day >= fromDay && l.day <= kstToday);
+
+  // 멤버별 합계 (순위 없이, 이름순 정렬)
+  const perUser = {};
+  members.forEach((m) => { perUser[m.user_id] = { name: m.nickname || names[m.user_id] || "익명", pts: 0, days: 0 }; });
+  inRange.forEach((l) => {
+    if (!perUser[l.user_id]) return;
+    perUser[l.user_id].pts += l.today_pts || 0;
+    if (l.goal_hit) perUser[l.user_id].days += 1;
+  });
+  const rows = Object.values(perUser).sort((a, b) => a.name.localeCompare(b.name, "ko"));
+
+  // 그룹 요약
+  const totalPts = rows.reduce((n, r) => n + r.pts, 0);
+  const activeMembers = rows.filter((r) => r.pts > 0).length;
+
+  // 최근 14일 달력 그리드 (멤버 × 날짜, 목표 달성 여부)
+  const days = [];
+  for (let i = 13; i >= 0; i--) { const d = new Date(Date.now() + 9 * 3600e3); d.setDate(d.getDate() - i); days.push(d.toISOString().slice(0, 10)); }
+  const hit = {}; // `${user}|${day}` -> goal_hit
+  logs.forEach((l) => { hit[`${l.user_id}|${l.day}`] = l.goal_hit; });
+
+  return (
+    <div style={{ paddingBottom: 12 }}>
+      {/* 기간 선택 */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        {[[7, "최근 7일"], [30, "최근 30일"], [0, "이번 달"]].map(([v, l]) => (
+          <button key={v} onClick={() => setRange(v)} style={{ flex: 1, padding: "8px 0", borderRadius: 9, fontSize: 12.5, fontWeight: 700, background: range === v ? T.gold : T.card, color: range === v ? "#fff" : T.muted, border: `1px solid ${range === v ? T.gold : T.line}` }}>{l}</button>
+        ))}
+      </div>
+
+      {/* 그룹 요약 */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {[{ n: totalPts + "P", l: "그룹 총 점수" }, { n: `${activeMembers}/${members.length}`, l: "참여 멤버" }].map((s) => (
+          <div key={s.l} style={{ flex: 1, background: `linear-gradient(150deg, #FFFDF7, ${T.goldSoft})`, border: `1px solid ${T.goldSoft}`, borderRadius: 13, padding: "13px 8px", textAlign: "center" }}>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: T.ink, fontFamily: serif }}>{s.n}</p>
+            <p style={{ margin: "2px 0 0", fontSize: 11.5, color: T.goldDeep, fontWeight: 600 }}>{s.l}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* 최근 14일 인증 달력 */}
+      <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 700, color: T.ink }}>최근 2주 인증 현황</p>
+      <div style={{ overflowX: "auto", marginBottom: 16, border: `1px solid ${T.line}`, borderRadius: 12, padding: 10, background: T.card }}>
+        <table style={{ borderCollapse: "collapse", fontSize: 11 }}>
+          <thead>
+            <tr>
+              <th style={{ position: "sticky", left: 0, background: T.card, textAlign: "left", padding: "2px 8px 6px 2px", color: T.muted, fontWeight: 600 }}></th>
+              {days.map((d) => (
+                <th key={d} style={{ padding: "2px 3px 6px", color: T.muted, fontWeight: 600, minWidth: 18 }}>{parseInt(d.slice(8), 10)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((m) => (
+              <tr key={m.user_id}>
+                <td style={{ position: "sticky", left: 0, background: T.card, padding: "3px 8px 3px 2px", color: T.ink, fontWeight: 600, whiteSpace: "nowrap" }}>{(m.nickname || "익명").slice(0, 5)}</td>
+                {days.map((d) => {
+                  const ok = hit[`${m.user_id}|${d}`];
+                  return <td key={d} style={{ padding: 2, textAlign: "center" }}>
+                    <span style={{ display: "inline-block", width: 15, height: 15, borderRadius: 5, background: ok ? T.sage : `${T.line}` }} title={ok ? "목표 달성" : ""} />
+                  </td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 기간별 멤버 점수 (순위 없이 이름순) */}
+      <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 700, color: T.ink }}>기간별 각자의 걸음</p>
+      <div style={{ display: "grid", gap: 7 }}>
+        {rows.map((r) => (
+          <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, background: T.card, borderRadius: 11, padding: "10px 13px", border: `1px solid ${T.line}` }}>
+            <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: T.ink }}>{r.name}</span>
+            <span style={{ fontSize: 12.5, color: T.sage, fontWeight: 700 }}>성실한 {r.days}일</span>
+            <span style={{ fontSize: 13.5, color: T.goldDeep, fontWeight: 700, minWidth: 44, textAlign: "right" }}>{r.pts}P</span>
+          </div>
+        ))}
+      </div>
+      <p style={{ margin: "12px 2px 0", fontSize: 11.5, color: T.muted, textAlign: "center", lineHeight: 1.6 }}>
+        순위 없이, 각자의 꾸준함을 함께 응원하는 자리예요 🌱
+      </p>
     </div>
   );
 }
@@ -3769,7 +3959,7 @@ function SignIn() {
 }
 
 function ProfileSetup({ user }) {
-  const [nick, setNick] = useState("");
+  const [nick, setNick] = useState(user?.kakaoName || "");
   const [church, setChurch] = useState("");
   const [agree, setAgree] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -3783,7 +3973,7 @@ function ProfileSetup({ user }) {
     if (!nick.trim() || !agree || saving) return;
     setSaving(true);
     await supabase.auth.updateUser({ data: { nickname: nick.trim(), church: church.trim() || "미입력" } });
-    await supabase.from("profiles").upsert({ id: user.id, nickname: nick.trim(), church: church.trim() || "미입력" });
+    await supabase.from("profiles").upsert({ id: user.id, nickname: nick.trim(), church: church.trim() || "미입력", email: user.email || null });
     setSaving(false);
   };
   const canSave = nick.trim() && agree && !saving;
