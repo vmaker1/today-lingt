@@ -401,6 +401,10 @@ const QT_LINKS = [
 /* 커뮤니티 — 아직 DB 연결 전. 지금은 샘플(데모) 화면이에요 */
 const AV = [T.gold, T.sage, T.rose, T.violet, T.teal, T.inkSoft];
 
+/* ⚡ 간단한 브라우저 캐시 (실패해도 앱은 그대로 동작) */
+const readCache = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } };
+const writeCache = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
 const todayLabel = () => new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
 
 /* ─────────────────────────────────────────────
@@ -458,21 +462,22 @@ export default function App() {
 
   // 관리자 여부 + DB 콘텐츠
   const [isAdmin, setIsAdmin] = useState(false);
-  const [dbContents, setDbContents] = useState([]);
-  const [dbVerses, setDbVerses] = useState([]);
+  // ⚡ 지난번에 받아둔 콘텐츠를 먼저 보여주고(즉시), 뒤에서 최신으로 갱신
+  const [dbContents, setDbContents] = useState(() => readCache("tl_c_contents") || []);
+  const [dbVerses, setDbVerses] = useState(() => readCache("tl_c_verses") || []);
 
   const loadContents = async () => {
-    const { data } = await supabase.from("contents").select("*").eq("active", true).order("sort_order");
-    if (data) setDbContents(data);
-    const { data: v } = await supabase.from("verses").select("*").eq("active", true).order("sort_order");
-    if (v) setDbVerses(v);
+    // 두 요청을 동시에 보내 기다리는 시간을 절반으로
+    const [{ data }, { data: v }] = await Promise.all([
+      supabase.from("contents").select("*").eq("active", true).order("sort_order"),
+      supabase.from("verses").select("*").eq("active", true).order("sort_order"),
+    ]);
+    if (data) { setDbContents(data); writeCache("tl_c_contents", data); }
+    if (v) { setDbVerses(v); writeCache("tl_c_verses", v); }
   };
   useEffect(() => { loadContents(); }, []);
-  useEffect(() => {
-    if (!session) { setIsAdmin(false); return; }
-    supabase.from("profiles").select("is_admin").eq("id", session.user.id).single()
-      .then(({ data }) => setIsAdmin(!!data?.is_admin));
-  }, [session]);
+  // 관리자 여부는 아래 '내 기록 불러오기'에서 프로필과 한 번에 받아와요
+  useEffect(() => { if (!session) setIsAdmin(false); }, [session]);
 
   // DB에 콘텐츠가 있으면 그걸 쓰고, 없으면 기본값 사용
   const byCat = (cat, fallback) => {
@@ -501,18 +506,48 @@ export default function App() {
   useEffect(() => {
     if (!session) { setLoaded(false); return; }
     const uid = session.user.id;
+
+    // ⚡ 지난번 내 화면(오늘 기록·포인트)을 먼저 보여주기 — 서버 응답 오기 전에도 바로 보이게
+    const snap = readCache("tl_me_" + uid);
+    if (snap) {
+      setPoints(snap.points || 0);
+      setFaithDays(snap.faithDays || 0);
+      setDailyGoal(snap.dailyGoal || DEFAULT_GOAL);
+      setEarnedFruits(snap.earnedFruits || []);
+      setGrowingFruit(snap.growingFruit || null);
+      setGrowStep(snap.growStep || 0);
+      setIsAdmin(!!snap.isAdmin);
+      if (snap.day === todayKey()) {
+        const td = snap.todayDims || [];
+        setDone7(Object.fromEntries(DIMS.map((x) => [x.key, td.includes(x.key)])));
+        setTodayPts(snap.todayPts || 0);
+        setMemDone(td.includes("mem"));
+      }
+      setMemStreak(snap.memStreak || 0);
+    }
+
+    let dead = false;
     (async () => {
+      // 프로필 · 신앙일기 · 오늘 기록을 '동시에' 요청 (예전엔 하나씩 4번 기다렸어요)
+      const [{ data: p }, { data: j }, { data: d }] = await Promise.all([
+        supabase.from("profiles")
+          .select("is_deleted, is_admin, points, faith_days, daily_goal, mem_streak, earned_fruits, growing_fruit, grow_step")
+          .eq("id", uid).maybeSingle(),
+        supabase.from("journal")
+          .select("id, day, dim, note").eq("user_id", uid).order("created_at", { ascending: false }).limit(200),
+        supabase.from("daily_logs")
+          .select("goal_hit, mem_done").eq("user_id", uid).eq("day", todayKey()).maybeSingle(),
+      ]);
+      if (dead) return;
       // 탈퇴(비활성화)한 계정이면 바로 로그아웃
-      const { data: flag } = await supabase.from("profiles").select("is_deleted").eq("id", uid).maybeSingle();
-      if (flag?.is_deleted) {
+      if (p?.is_deleted) {
+        try { localStorage.removeItem("tl_me_" + uid); } catch {}
         alert("탈퇴 처리된 계정이에요. 다시 이용하시려면 문의해 주세요.");
         await supabase.auth.signOut();
         return;
       }
+      setIsAdmin(!!p?.is_admin);
       // 프로필 (포인트 · 성실한 날 · 목표 · 열매)
-      const { data: p } = await supabase.from("profiles")
-        .select("points, faith_days, daily_goal, mem_streak, earned_fruits, growing_fruit, grow_step")
-        .eq("id", uid).single();
       if (p) {
         setPoints(p.points || 0);
         setFaithDays(p.faith_days || 0);
@@ -523,8 +558,6 @@ export default function App() {
         setGrowStep(p.grow_step || 0);
       }
       // 신앙일기 (전체) — 오늘 완료 여부의 원본 소스
-      const { data: j } = await supabase.from("journal")
-        .select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(200);
       const journalRows = j || [];
       if (j) setJournal(journalRows.map((r) => ({ id: r.id, date: r.day, dim: r.dim, note: r.note || "", time: "" })));
 
@@ -532,9 +565,7 @@ export default function App() {
       const todayDims = [...new Set(journalRows.filter((r) => r.day === todayKey()).map((r) => r.dim))];
       const todayPtsCalc = todayDims.reduce((n, k) => n + (DIM[k]?.pts || 0), 0);
 
-      // daily_logs는 목표달성·암송 여부 등 보조 정보로만 사용
-      const { data: d } = await supabase.from("daily_logs")
-        .select("*").eq("user_id", uid).eq("day", todayKey()).maybeSingle();
+      // daily_logs(d)는 목표달성·암송 여부 등 보조 정보로만 사용
 
       setDone7(Object.fromEntries(DIMS.map((x) => [x.key, todayDims.includes(x.key)])));
       setTodayPts(todayPtsCalc);
@@ -550,8 +581,16 @@ export default function App() {
       while (memDays.has(cur.toISOString().slice(0, 10))) { streak++; cur.setDate(cur.getDate() - 1); }
       setMemStreak(streak);
 
+      // 다음에 열 때 바로 보여줄 내 화면 저장
+      writeCache("tl_me_" + uid, {
+        day: todayKey(), todayDims, todayPts: todayPtsCalc, memStreak: streak, isAdmin: !!p?.is_admin,
+        points: p?.points || 0, faithDays: p?.faith_days || 0, dailyGoal: p?.daily_goal || DEFAULT_GOAL,
+        earnedFruits: p?.earned_fruits || [], growingFruit: p?.growing_fruit || null, growStep: p?.grow_step || 0,
+      });
+
       setLoaded(true);
     })();
+    return () => { dead = true; };
   }, [session]);
 
   // ── 루틴 알림 (앱이 열려 있을 때 정해진 시간에 알림) ──
@@ -696,7 +735,6 @@ export default function App() {
   return (
     <div style={{ background: "#E9E4D8", minHeight: "100vh", display: "flex", justifyContent: "center", fontFamily: sans }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         button { font-family: inherit; cursor: pointer; border: none; background: none; }
         textarea, input { font-family: inherit; }
