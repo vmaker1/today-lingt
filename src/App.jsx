@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabase.js";
+import { mark } from "./debugTimings.js";
 import {
   Sunrise, BookOpen, Feather, HeartHandshake, Music, Church, Footprints,
   Sprout, Star, NotebookPen, MessageCircle, Award, User, Play, Check, Heart,
@@ -428,7 +429,8 @@ export default function App() {
   useEffect(() => {
     // 재설정 링크(#type=recovery)로 들어왔는지 확인
     if (typeof window !== "undefined" && window.location.hash.includes("type=recovery")) setRecovery(true);
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
+    mark("로그인 확인 시작");
+    supabase.auth.getSession().then(({ data }) => { mark("로그인 확인 끝" + (data.session ? " (로그인됨)" : " (비로그인)")); setSession(data.session); setAuthReady(true); });
     const { data: sub } = supabase.auth.onAuthStateChange((ev, s) => {
       setSession(s);
       if (ev === "PASSWORD_RECOVERY") setRecovery(true);
@@ -468,10 +470,12 @@ export default function App() {
 
   const loadContents = async () => {
     // 두 요청을 동시에 보내 기다리는 시간을 절반으로
+    mark("콘텐츠·구절 요청");
     const [{ data }, { data: v }] = await Promise.all([
       supabase.from("contents").select("*").eq("active", true).order("sort_order"),
       supabase.from("verses").select("*").eq("active", true).order("sort_order"),
     ]);
+    mark("콘텐츠·구절 받음");
     if (data) { setDbContents(data); writeCache("tl_c_contents", data); }
     if (v) { setDbVerses(v); writeCache("tl_c_verses", v); }
   };
@@ -528,6 +532,7 @@ export default function App() {
 
     let dead = false;
     (async () => {
+      mark("내 기록 요청");
       // 프로필 · 신앙일기 · 오늘 기록을 '동시에' 요청 (예전엔 하나씩 4번 기다렸어요)
       const [{ data: p }, { data: j }, { data: d }] = await Promise.all([
         supabase.from("profiles")
@@ -538,6 +543,7 @@ export default function App() {
         supabase.from("daily_logs")
           .select("goal_hit, mem_done").eq("user_id", uid).eq("day", todayKey()).maybeSingle(),
       ]);
+      mark("내 기록 받음");
       if (dead) return;
       // 탈퇴(비활성화)한 계정이면 바로 로그아웃
       if (p?.is_deleted) {
